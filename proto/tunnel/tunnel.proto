@@ -1,0 +1,56 @@
+//
+// Copyright 2019 Google Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+syntax = "proto3";
+
+// Package grpctunnel defines a service specification for a TCP over gRPC proxy
+// interface. This interface is set so that the tunnel can act as a transparent
+// TCP proxy between a pair of gRPC client and server endpoints.
+package grpctunnel;
+
+option go_package = "proto/tunnel;grpctunnel";
+
+service Tunnel {
+  // Register is used to request new Tunnel gRPCs.
+  rpc Register(stream Session) returns (stream Session);
+  // Tunnel allows the tunnel client and server to create a bidirectional stream
+  // in which data can be forwarded.
+  rpc Tunnel(stream Data) returns (stream Data);
+}
+
+message Data {
+  int32 tag = 1;   // Tag associated with the initial TCP stream setup.
+  bytes data = 2;  // Bytes received from client connection.
+  bool close = 3;  // Connection has reached EOF.
+}
+
+message Session {
+  // The tag associated with the initial TCP stream setup.
+  int32 tag = 1;
+  // Used to ack the connection tag.
+  bool accept = 2;
+  // Capabilities of the tunnel client and server.
+  Capabilities capabilities = 3;
+  // Target id identifies which handler to use for a tunnel stream.
+  string target_id = 4;
+  // Error allows the register stream to return an error without breaking the
+  // stream.
+  string error = 5;
+}
+
+message Capabilities {
+  bool handler = 1;  // Whether a handler is installed on the endpoint.
+}
