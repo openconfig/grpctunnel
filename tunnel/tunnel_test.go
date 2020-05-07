@@ -600,7 +600,7 @@ func TestClientCapabilitiesError(t *testing.T) {
 			s := &registerTestStream{
 				maxSends: 10,
 				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: false}},
+					{Capabilities: &tpb.Capabilities{Handler: false}},
 				},
 				sendErr: test.sendErr,
 			}
@@ -652,7 +652,7 @@ func TestClientCapabilitiesSuccess(t *testing.T) {
 			s := &registerTestStream{
 				maxSends: 10,
 				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: test.peerHandler}},
+					{Capabilities: &tpb.Capabilities{Handler: test.peerHandler}},
 				},
 				sendErr: test.sendErr,
 			}
@@ -779,7 +779,7 @@ func TestServerCapabilities(t *testing.T) {
 			s := &registerTestStream{
 				maxSends: 10,
 				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: test.peerHandler}},
+					{Capabilities: &tpb.Capabilities{Handler: test.peerHandler}},
 				},
 				sendErr: test.sendErr,
 				recvErr: test.recvErr,
@@ -924,8 +924,8 @@ func TestServerNewClientSession(t *testing.T) {
 			maxSends: 10,
 			rh:       serverRegHandlerError,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, Error: "test error"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, Error: "test error"},
 			},
 			streamErr: true,
 			i:         make(chan ioOrErr),
@@ -936,8 +936,8 @@ func TestServerNewClientSession(t *testing.T) {
 			addConn:  true,
 			maxSends: 10,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 5, Error: "test error"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 5, Error: "test error"},
 			},
 		},
 		{
@@ -945,8 +945,8 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       serverRegHandlerError,
 			maxSends: 0,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 		},
 		{
@@ -954,8 +954,8 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       serverRegHandlerError,
 			maxSends: 1,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 		},
 		{
@@ -964,8 +964,8 @@ func TestServerNewClientSession(t *testing.T) {
 			addConn:  true,
 			maxSends: 0,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 		},
 		{
@@ -974,8 +974,8 @@ func TestServerNewClientSession(t *testing.T) {
 			addConn:  true,
 			maxSends: 1,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 		},
 		{
@@ -983,8 +983,8 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       srh,
 			maxSends: 0,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 		},
 		{
@@ -993,8 +993,8 @@ func TestServerNewClientSession(t *testing.T) {
 			blockingStream: true,
 			maxSends:       1,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 			ioe: ioOrErr{err: errors.New("test error")},
 		},
@@ -1004,12 +1004,12 @@ func TestServerNewClientSession(t *testing.T) {
 			blockingStream: true,
 			maxSends:       3,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
-				&tpb.Session{Tag: 2, TargetId: "testTarget"},
-				&tpb.Session{Tag: 3, TargetId: "testTarget"},
-				&tpb.Session{Tag: 4, TargetId: "testTarget"},
-				&tpb.Session{Tag: 5, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
+				{Tag: 2, TargetId: "testTarget"},
+				{Tag: 3, TargetId: "testTarget"},
+				{Tag: 4, TargetId: "testTarget"},
+				{Tag: 5, TargetId: "testTarget"},
 			},
 		},
 		{
@@ -1018,8 +1018,8 @@ func TestServerNewClientSession(t *testing.T) {
 			blockingStream: true,
 			maxSends:       1,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 			ioe: ioOrErr{rwc: &ioStream{}},
 		},
@@ -1028,8 +1028,8 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       srh,
 			maxSends: 1,
 			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+				{Capabilities: &tpb.Capabilities{Handler: true}},
+				{Tag: 1, TargetId: "testTarget"},
 			},
 			ioe: ioOrErr{rwc: &ioStream{}},
 		},
@@ -1342,7 +1342,7 @@ func TestClientRun(t *testing.T) {
 				ctx:      ctx,
 				maxSends: 10,
 				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
+					{Capabilities: &tpb.Capabilities{Handler: true}},
 				},
 			}},
 			c: client,
@@ -1392,7 +1392,7 @@ func TestClientStart(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: false, TargetId: "testID"},
+						{Tag: 1, Accept: false, TargetId: "testID"},
 					},
 					streamSend: []*tpb.Session{},
 				},
@@ -1404,7 +1404,7 @@ func TestClientStart(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+						{Tag: 1, Accept: true, TargetId: "testID"},
 					},
 					streamSend: []*tpb.Session{},
 				},
@@ -1587,7 +1587,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+						{Tag: 1, Accept: true, TargetId: "testID"},
 					},
 					sendErr: true,
 				},
@@ -1604,7 +1604,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+						{Tag: 1, Accept: true, TargetId: "testID"},
 					},
 					streamSend: []*tpb.Session{},
 				},
@@ -1624,7 +1624,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+						{Tag: 1, Accept: true, TargetId: "testID"},
 					},
 					streamSend: []*tpb.Session{},
 				},
@@ -1646,7 +1646,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+						{Tag: 1, Accept: true, TargetId: "testID"},
 					},
 					streamSend: []*tpb.Session{},
 				},
@@ -1666,7 +1666,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+						{Tag: 1, Accept: true, TargetId: "testID"},
 					},
 					streamSend: []*tpb.Session{},
 				},
