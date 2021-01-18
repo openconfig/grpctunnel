@@ -79,10 +79,12 @@ func Run(ctx context.Context, conf Config) error {
 		return nil
 	}
 
+	targets := make([]string, 1)
+	targets[0] = conf.Target
 	client, err := tunnel.NewClient(tpb.NewTunnelClient(clientConn), tunnel.ClientConfig{
 		RegisterHandler: registerHandler,
 		Handler:         handler,
-	})
+	}, &targets)
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %v", err)
 	}

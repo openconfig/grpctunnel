@@ -28,14 +28,15 @@ package grpctunnel
 
 import (
 	context "context"
+	reflect "reflect"
+	sync "sync"
+
 	proto "github.com/golang/protobuf/proto"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
-	reflect "reflect"
-	sync "sync"
 )
 
 const (
@@ -202,7 +203,8 @@ type Capabilities struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Handler bool `protobuf:"varint,1,opt,name=handler,proto3" json:"handler,omitempty"` // Whether a handler is installed on the endpoint.
+	Handler bool     `protobuf:"varint,1,opt,name=handler,proto3" json:"handler,omitempty"` // Whether a handler is installed on the endpoint.
+	Target  []string `protobuf:"bytes,2,rep,name=target,proto3" json:"target,omitempty"`
 }
 
 func (x *Capabilities) Reset() {
@@ -242,6 +244,13 @@ func (x *Capabilities) GetHandler() bool {
 		return x.Handler
 	}
 	return false
+}
+
+func (x *Capabilities) GetTarget() []string {
+	if x != nil {
+		return x.Target
+	}
+	return nil
 }
 
 var File_proto_tunnel_tunnel_proto protoreflect.FileDescriptor

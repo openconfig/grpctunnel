@@ -104,7 +104,12 @@ func Run(ctx context.Context, conf Config) error {
 	s := grpc.NewServer(opts...)
 	defer s.Stop()
 
-	ts, err := tunnel.NewServer(tunnel.ServerConfig{})
+	tagRegHandler := func(ts []string) error {
+		log.Printf("handling the received targets: %v", ts)
+		return nil
+	}
+
+	ts, err := tunnel.NewServer(tunnel.ServerConfig{TargetRegisterHandler: tagRegHandler})
 	if err != nil {
 		return fmt.Errorf("failed to create new server: %v", err)
 	}

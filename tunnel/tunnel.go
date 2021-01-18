@@ -196,15 +196,21 @@ func (e *endpoint) nextTag() int32 {
 }
 
 // ServerRegHandlerFunc defines the targetIDs that the handler function can accept.
+// It is only called when the server accepts new session from the client.
 type ServerRegHandlerFunc func(ss ServerSession) error
 
 // ServerHandlerFunc handles sessions the server receives from the client.
 type ServerHandlerFunc func(ss ServerSession, rwc io.ReadWriteCloser) error
 
+// ServerTargRegHandlerFunc handles the initial registration of the tunnel to handle the target lists.
+// It will be called at the registration stage.
+type ServerTargRegHandlerFunc func(ts []string) error
+
 // ServerConfig contains the config for the server.
 type ServerConfig struct {
-	RegisterHandler ServerRegHandlerFunc
-	Handler         ServerHandlerFunc
+	TargetRegisterHandler ServerTargRegHandlerFunc
+	RegisterHandler       ServerRegHandlerFunc
+	Handler               ServerHandlerFunc
 }
 
 // ServerSession is used by NewSession and the register handler. In the register
@@ -227,6 +233,9 @@ type Server struct {
 
 	cmu     sync.RWMutex
 	clients map[net.Addr]regStream
+
+	targets     []string
+	peerTargets []string
 }
 
 // NewServer creates a new tunnel server.
@@ -297,13 +306,15 @@ func (s *Server) deleteClient(addr net.Addr) {
 // be sent on the registration stream.
 func (s *Server) capabilities(addr net.Addr, rs regStream) error {
 	lh := s.sc.Handler != nil && s.sc.RegisterHandler != nil
-	ph, err := capabilities(lh, rs)
+	ph, ts, err := capabilities(lh, rs, s.targets)
 	if err != nil {
 		return fmt.Errorf("capabilities error: %v", err)
 	}
 	if ph {
 		s.addPeerHandler(addr)
 	}
+	s.peerTargets = ts
+	log.Printf("server set peer targets:%v", s.peerTargets)
 	return nil
 }
 
@@ -319,6 +330,13 @@ func (s *Server) Register(stream tpb.Tunnel_RegisterServer) error {
 	if err := s.capabilities(p.Addr, rs); err != nil {
 		return fmt.Errorf("error from capabilities: %v", err)
 	}
+
+	if s.sc.TargetRegisterHandler != nil {
+		if err := s.sc.TargetRegisterHandler(s.peerTargets); err != nil {
+			return fmt.Errorf("error adding client: %v", err)
+		}
+	}
+
 	if err := s.addClient(p.Addr, rs); err != nil {
 		return fmt.Errorf("error adding client: %v", err)
 	}
@@ -523,10 +541,13 @@ type Client struct {
 	cmu  sync.RWMutex
 	rs   *regSafeStream
 	addr net.Addr // peer address to use in endpoint map
+
+	targets     []string
+	peerTargets []string
 }
 
 // NewClient creates a new tunnel client.
-func NewClient(tc tpb.TunnelClient, cc ClientConfig) (*Client, error) {
+func NewClient(tc tpb.TunnelClient, cc ClientConfig, ts *[]string) (*Client, error) {
 	if (cc.RegisterHandler == nil) != (cc.Handler == nil) {
 		return nil, errors.New("tunnel: can't create client: only 1 handler set")
 	}
@@ -539,6 +560,7 @@ func NewClient(tc tpb.TunnelClient, cc ClientConfig) (*Client, error) {
 			conns:     make(map[session]chan ioOrErr),
 			increment: -1,
 		},
+		targets: *ts,
 	}, nil
 }
 
@@ -613,13 +635,14 @@ func (c *Client) Run(ctx context.Context) error {
 // messages that will be sent on the registration stream.
 func (c *Client) capabilities(addr net.Addr, rs regStream) error {
 	lh := (c.cc.Handler != nil) && (c.cc.RegisterHandler != nil)
-	ph, err := capabilities(lh, rs)
+	ph, ts, err := capabilities(lh, rs, c.targets)
 	if err != nil {
 		return err
 	}
 	if ph {
 		c.peerHandler = true
 	}
+	c.peerTargets = ts
 	return nil
 }
 
@@ -732,21 +755,24 @@ func (c *Client) newTunnelStream(ctx context.Context, tag int32) (*ioStream, err
 
 // capabilities sends and receives capabilities between the endpoints and
 // returns whether or not the peer handler has been set or an error.
-func capabilities(lh bool, rs regStream) (bool, error) {
+// It also exchanges targets.
+func capabilities(lh bool, rs regStream, targets []string) (bool, []string, error) {
 	if err := rs.Send(&tpb.Session{
 		Capabilities: &tpb.Capabilities{
 			Handler: lh,
+			Target:  targets,
 		},
 	}); err != nil {
-		return false, fmt.Errorf("failed to send capabilities: %v", err)
+		return false, nil, fmt.Errorf("failed to send capabilities: %v", err)
 	}
 	s, err := rs.Recv()
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	ph := s.GetCapabilities().GetHandler()
+	ts := s.GetCapabilities().GetTarget()
 	if !ph && !lh {
-		return false, errors.New("no handlers defined")
+		return false, ts, errors.New("no handlers defined")
 	}
-	return ph, nil
+	return ph, ts, nil
 }

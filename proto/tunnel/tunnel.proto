@@ -53,4 +53,5 @@ message Session {
 
 message Capabilities {
   bool handler = 1;  // Whether a handler is installed on the endpoint.
+  repeated string target = 2; // A list of targets supported by the endpoint.
 }
