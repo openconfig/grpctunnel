@@ -19,6 +19,8 @@ package server
 import (
 	"context"
 	"testing"
+
+	"google3/third_party/golang/grpctunnel/tunnel/tunnel"
 )
 
 func TestListen(t *testing.T) {
@@ -31,7 +33,7 @@ func TestListen(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := listen(context.Background(), nil, test.lAddr, ""); err == nil {
+			if err := listen(context.Background(), nil, test.lAddr, &[]tunnel.Target{}); err == nil {
 				t.Fatalf("listen() got success, want error")
 			}
 		})

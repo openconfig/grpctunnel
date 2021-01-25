@@ -36,7 +36,7 @@ import (
 
 // Config defines the parameters to run a tunnel client.
 type Config struct {
-	TunnelAddress, DialAddress, CertFile, Target string
+	TunnelAddress, DialAddress, CertFile, Target, TargetType string
 }
 
 // Run starts a tunnel client, connecting to the tunnel server via the provided tunnel address.
@@ -58,33 +58,37 @@ func Run(ctx context.Context, conf Config) error {
 	}
 	defer clientConn.Close()
 
-	registerHandler := func(u string) error {
-		if u != conf.Target {
-			return fmt.Errorf("client cannot handle: %s", u)
+	registerHandler := func(t tunnel.Target) error {
+		if t.ID != conf.Target {
+			return fmt.Errorf("client cannot handle: %s", t.ID)
 		}
 		return nil
 	}
 
-	handler := func(_ string, i io.ReadWriteCloser) error {
+	handler := func(_ tunnel.Target, i io.ReadWriteCloser) error {
 		conn, err := net.Dial("tcp", conf.DialAddress)
 		if err != nil {
 			log.Printf("Error dialing client: %v", err)
 			return err
 		}
+
 		if err = bidi.Copy(i, conn); err != nil {
 			// Logging this error only as we don't want the client to stop because an
 			// underlying stream had an issue
 			log.Printf("Copy error: %v", err)
 		}
+
 		return nil
 	}
 
-	targets := make([]string, 1)
-	targets[0] = conf.Target
+	targets := make(map[tunnel.Target]struct{})
+	t := tunnel.Target{ID: conf.Target, Type: conf.TargetType}
+	targets[t] = struct{}{}
 	client, err := tunnel.NewClient(tpb.NewTunnelClient(clientConn), tunnel.ClientConfig{
 		RegisterHandler: registerHandler,
 		Handler:         handler,
-	}, &targets)
+	}, targets)
+
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %v", err)
 	}

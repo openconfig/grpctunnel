@@ -37,7 +37,7 @@ import (
 // The listener goroutine will spawn new goroutines and request a new tunnel stream per
 // accepted connection. These goroutines will run until the copy has completed or an error
 // is encountered.
-func listen(ctx context.Context, server *tunnel.Server, listenAddress, target string) error {
+func listen(ctx context.Context, server *tunnel.Server, listenAddress string, targets *[]tunnel.Target) error {
 	l, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %s: %v", listenAddress, err)
@@ -62,11 +62,14 @@ func listen(ctx context.Context, server *tunnel.Server, listenAddress, target st
 			// underlying stream issue to tear the server down
 			go func(conn net.Conn) {
 				defer conn.Close()
-				session, err := server.NewSession(ctx, tunnel.ServerSession{TargetID: target})
+				log.Printf("received connection. trying a new session.")
+
+				session, err := server.NewSession(ctx, tunnel.ServerSession{Target: (*targets)[0]})
 				if err != nil {
 					log.Printf("error from new session: %v", err)
 					return
 				}
+
 				if err = bidi.Copy(session, conn); err != nil {
 					log.Printf("error from bidi copy: %v", err)
 				}
@@ -84,7 +87,7 @@ func listen(ctx context.Context, server *tunnel.Server, listenAddress, target st
 
 // Config defines the parameters to run a tunnel server.
 type Config struct {
-	TunnelAddress, ListenAddress, CertFile, KeyFile, Target string
+	TunnelAddress, ListenAddress, CertFile, KeyFile string
 }
 
 // Run starts a tunnel server using the provided config.
@@ -104,12 +107,21 @@ func Run(ctx context.Context, conf Config) error {
 	s := grpc.NewServer(opts...)
 	defer s.Stop()
 
-	tagRegHandler := func(ts []string) error {
-		log.Printf("handling the received targets: %v", ts)
+	targets := []tunnel.Target{}
+	addTagHandler := func(t tunnel.Target) error {
+		log.Printf("handling target addition: (%s:%s)", t.ID, t.Type)
+		targets = append(targets, t)
+		if len(targets) != 1 {
+			return fmt.Errorf("found %d targets. this exmaple only support 1", len(targets))
+		}
 		return nil
 	}
 
-	ts, err := tunnel.NewServer(tunnel.ServerConfig{TargetRegisterHandler: tagRegHandler})
+	deleteTagHandler := func(t tunnel.Target) error {
+		log.Printf("handling target deletion: (%s:%s)", t.ID, t.Type)
+		return nil
+	}
+	ts, err := tunnel.NewServer(tunnel.ServerConfig{AddTargetHandler: addTagHandler, DeleteTargetHandler: deleteTagHandler})
 	if err != nil {
 		return fmt.Errorf("failed to create new server: %v", err)
 	}
@@ -133,7 +145,7 @@ func Run(ctx context.Context, conf Config) error {
 	}()
 
 	go func() {
-		if err := listen(ctx, ts, conf.ListenAddress, conf.Target); err != nil {
+		if err := listen(ctx, ts, conf.ListenAddress, &targets); err != nil {
 			errCh <- err
 		}
 	}()

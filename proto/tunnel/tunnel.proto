@@ -24,8 +24,9 @@ package grpctunnel;
 option go_package = "proto/tunnel;grpctunnel";
 
 service Tunnel {
-  // Register is used to request new Tunnel gRPCs.
-  rpc Register(stream Session) returns (stream Session);
+  // Register is used to register targets reachable via either the client
+  // or server and request new Tunnel RPC invocations.
+  rpc Register(stream RegisterOp) returns (stream RegisterOp);
   // Tunnel allows the tunnel client and server to create a bidirectional stream
   // in which data can be forwarded.
   rpc Tunnel(stream Data) returns (stream Data);
@@ -37,21 +38,51 @@ message Data {
   bool close = 3;  // Connection has reached EOF.
 }
 
+message RegisterOp {
+  oneof Registration {
+    Target target = 1;
+    Session session = 2;
+  }
+}
+
+enum TargetType {
+  UNKNOWN = 0;
+  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=22
+  SSH = 22;
+  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9339
+  GNMI_GNOI = 9339;
+}
+
+message Target {
+  enum TargetOp {
+    UNKNOWN = 0;
+    ADD = 1;
+    REMOVE = 2;
+  }
+  TargetOp op = 1;
+  // Used to ack the registration of target_id and target_type.
+  bool accept = 2;
+  // Target id identifies which handler to use for a tunnel stream.
+  string target_id = 3;
+  // String value of the corresponding TargetType for a standard protocol.
+  // A non-enumerated protocol is supported so long as both tunnel client and
+  // server are in agreement on a particular value.
+  string target_type = 4;
+  string error = 5;
+}
+
 message Session {
   // The tag associated with the initial TCP stream setup.
   int32 tag = 1;
   // Used to ack the connection tag.
   bool accept = 2;
-  // Capabilities of the tunnel client and server.
-  Capabilities capabilities = 3;
   // Target id identifies which handler to use for a tunnel stream.
-  string target_id = 4;
+  string target_id = 3;
+  // String value of the corresponding TargetType for a standard protocol.
+  // A non-enumerated protocol is supported so long as both tunnel client and
+  // server are in agreement on a particular value.
+  string target_type = 4;
   // Error allows the register stream to return an error without breaking the
   // stream.
   string error = 5;
-}
-
-message Capabilities {
-  bool handler = 1;  // Whether a handler is installed on the endpoint.
-  repeated string target = 2; // A list of targets supported by the endpoint.
 }
