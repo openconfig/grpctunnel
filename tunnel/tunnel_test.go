@@ -41,21 +41,21 @@ type registerTestStream struct {
 	grpc.ServerStream
 	maxSends, sends  int
 	ctx              context.Context
-	streamRecv       []*tpb.Session
-	streamSend       []*tpb.Session
+	streamRecv       []*tpb.RegisterOp
+	streamSend       []*tpb.RegisterOp
 	sendErr, recvErr bool
 }
 
-func (t *registerTestStream) Recv() (*tpb.Session, error) {
+func (t *registerTestStream) Recv() (*tpb.RegisterOp, error) {
 	if len(t.streamRecv) == 0 || t.recvErr {
 		return nil, errRead
 	}
-	session := t.streamRecv[0]
+	regOp := t.streamRecv[0]
 	t.streamRecv = t.streamRecv[1:]
-	return session, nil
+	return regOp, nil
 }
 
-func (t *registerTestStream) Send(s *tpb.Session) error {
+func (t *registerTestStream) Send(s *tpb.RegisterOp) error {
 	if t.sendErr || t.sends > t.maxSends {
 		return errWrite
 	}
@@ -72,8 +72,8 @@ type regTestStreamBlocking struct {
 	*registerTestStream
 }
 
-func (t *regTestStreamBlocking) Recv() (*tpb.Session, error) {
-	s := make(chan *tpb.Session)
+func (t *regTestStreamBlocking) Recv() (*tpb.RegisterOp, error) {
+	s := make(chan *tpb.RegisterOp)
 	e := make(chan error)
 	go func() {
 		if len(t.registerTestStream.streamRecv) > 0 {
@@ -128,21 +128,21 @@ type registerClientStream struct {
 
 	maxSends, sends  int
 	ctx              context.Context
-	streamRecv       []*tpb.Session
-	streamSend       []*tpb.Session
+	streamRecv       []*tpb.RegisterOp
+	streamSend       []*tpb.RegisterOp
 	sendErr, recvErr bool
 }
 
-func (t *registerClientStream) Recv() (*tpb.Session, error) {
+func (t *registerClientStream) Recv() (*tpb.RegisterOp, error) {
 	if t.recvErr || len(t.streamRecv) == 0 {
 		return nil, errRead
 	}
-	session := t.streamRecv[0]
+	regOp := t.streamRecv[0]
 	t.streamRecv = t.streamRecv[1:]
-	return session, nil
+	return regOp, nil
 }
 
-func (t *registerClientStream) Send(s *tpb.Session) error {
+func (t *registerClientStream) Send(s *tpb.RegisterOp) error {
 	if t.sendErr || t.sends > t.maxSends {
 		return errWrite
 	}
@@ -159,8 +159,8 @@ type regClientStreamBlocking struct {
 	*registerClientStream
 }
 
-func (t regClientStreamBlocking) Recv() (*tpb.Session, error) {
-	s := make(chan *tpb.Session)
+func (t regClientStreamBlocking) Recv() (*tpb.RegisterOp, error) {
+	s := make(chan *tpb.RegisterOp)
 	e := make(chan error)
 	go func() {
 		if len(t.registerClientStream.streamRecv) > 0 {
@@ -237,8 +237,8 @@ func (tbc *tunnelBlockingClient) Register(ctx context.Context, opts ...grpc.Call
 		registerClientStream: &registerClientStream{
 			ctx:          ctx,
 			ClientStream: tbc.regStream,
-			streamSend:   []*tpb.Session{},
-			streamRecv:   []*tpb.Session{},
+			streamSend:   []*tpb.RegisterOp{},
+			streamRecv:   []*tpb.RegisterOp{},
 		},
 	}, nil
 }
@@ -257,19 +257,19 @@ func TestRegSafeStreamSend(t *testing.T) {
 	tests := []struct {
 		name    string
 		rs      *registerTestStream
-		send    *tpb.Session
+		send    *tpb.RegisterOp
 		wantErr bool
 	}{
 		{
 			name:    "success",
 			rs:      &registerTestStream{maxSends: 1},
-			send:    &tpb.Session{Tag: 5},
+			send:    &tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 5}}},
 			wantErr: false,
 		},
 		{
 			name:    "error",
 			rs:      &registerTestStream{sendErr: true},
-			send:    &tpb.Session{Tag: 5},
+			send:    &tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 5}}},
 			wantErr: true,
 		},
 	}
@@ -485,51 +485,6 @@ func TestEndpointMap(t *testing.T) {
 	})
 }
 
-func TestPeerHandler(t *testing.T) {
-	s, err := NewServer(ServerConfig{})
-	if err != nil {
-		t.Fatalf("failed to create new server: %v", err)
-	}
-	var addr net.Addr
-	t.Run("AddEntry", func(t *testing.T) {
-		want := true
-		s.addPeerHandler(addr)
-		if _, got := s.peerHandlers[addr]; got != want {
-			t.Errorf("addPeerHandler() got %v, want %v", got, want)
-		}
-	})
-	t.Run("DeleteEntry", func(t *testing.T) {
-		want := false
-		s.deletePeerHandler(addr)
-		if _, got := s.peerHandlers[addr]; got != want {
-			t.Errorf("deletePeerHandler() got %v, want %v", got, want)
-		}
-	})
-	t.Run("Get-noEntryInMap", func(t *testing.T) {
-		want := false
-		var addr net.Addr
-		if got := s.peerHandler(addr); got != want {
-			t.Errorf("peerHandler() got %v, want %v", got, want)
-		}
-	})
-	t.Run("Get-trueEntryInMap", func(t *testing.T) {
-		want := true
-		var addr net.Addr
-		s.peerHandlers[addr] = true
-		if got := s.peerHandler(addr); got != want {
-			t.Errorf("peerHandler() got %v, want %v", got, want)
-		}
-	})
-	t.Run("Get-falseEntryInMap", func(t *testing.T) {
-		want := false
-		var addr net.Addr
-		s.peerHandlers[addr] = false
-		if got := s.peerHandler(addr); got != want {
-			t.Errorf("peerHandler() got %v, want %v", got, want)
-		}
-	})
-}
-
 func TestNewClientSuccess(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -537,15 +492,15 @@ func TestNewClientSuccess(t *testing.T) {
 	}{
 		{
 			name: "HandlerOnly",
-			cc:   ClientConfig{Handler: func(string, io.ReadWriteCloser) error { return nil }},
+			cc:   ClientConfig{Handler: func(Target, io.ReadWriteCloser) error { return nil }},
 		},
 		{
 			name: "RegHandlerOnly",
-			cc:   ClientConfig{RegisterHandler: func(string) error { return nil }},
+			cc:   ClientConfig{RegisterHandler: func(Target) error { return nil }},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewClient(nil, test.cc); err == nil {
+			if _, err := NewClient(nil, test.cc, map[Target]struct{}{}); err == nil {
 				t.Fatal("NewClient() got success, wanted error")
 			}
 		})
@@ -560,8 +515,8 @@ func TestNewClientFailure(t *testing.T) {
 		{
 			name: "bothHandlers",
 			cc: ClientConfig{
-				RegisterHandler: func(string) error { return nil },
-				Handler:         func(string, io.ReadWriteCloser) error { return nil },
+				RegisterHandler: func(Target) error { return nil },
+				Handler:         func(Target, io.ReadWriteCloser) error { return nil },
 			},
 		},
 		{
@@ -570,106 +525,8 @@ func TestNewClientFailure(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewClient(nil, test.cc); err != nil {
+			if _, err := NewClient(nil, test.cc, map[Target]struct{}{}); err != nil {
 				t.Fatalf("NewClient() got %v, wanted success", err)
-			}
-		})
-	}
-}
-
-func TestClientCapabilitiesError(t *testing.T) {
-	tests := []struct {
-		name    string
-		sendErr bool
-		session *tpb.Session
-	}{
-		{
-			name: "nilHandlers",
-		},
-		{
-			name:    "failRecv",
-			sendErr: true,
-		},
-		{
-			name:    "failSend",
-			session: &tpb.Session{},
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			s := &registerTestStream{
-				maxSends: 10,
-				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: false}},
-				},
-				sendErr: test.sendErr,
-			}
-			var addr net.Addr
-			c, err := NewClient(nil, ClientConfig{
-				Handler:         nil,
-				RegisterHandler: nil,
-			})
-			if err != nil {
-				t.Fatalf("failed to create new client: %v", err)
-			}
-			err = c.capabilities(addr, s)
-			if err == nil {
-				t.Fatal("capabilities() got nil, want error.")
-			}
-		})
-	}
-}
-
-func TestClientCapabilitiesSuccess(t *testing.T) {
-	h := func(targetID string, rwc io.ReadWriteCloser) error { return nil }
-	rh := func(targetID string) error { return nil }
-	tests := []struct {
-		name        string
-		handler     ClientHandlerFunc
-		regHandler  ClientRegHandlerFunc
-		peerHandler bool
-		sendErr     bool
-		session     *tpb.Session
-	}{
-		{
-			name:        "definedHandlers",
-			handler:     h,
-			regHandler:  rh,
-			peerHandler: true,
-		},
-		{
-			name:        "nilSendDefinedRecv",
-			peerHandler: true,
-		},
-		{
-			name:       "definedSendNilRecv",
-			handler:    h,
-			regHandler: rh,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			s := &registerTestStream{
-				maxSends: 10,
-				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: test.peerHandler}},
-				},
-				sendErr: test.sendErr,
-			}
-			var addr net.Addr
-			c, err := NewClient(nil, ClientConfig{
-				Handler:         test.handler,
-				RegisterHandler: test.regHandler,
-			})
-			if err != nil {
-				t.Fatalf("Failed to create new client: %v", err)
-			}
-			err = c.capabilities(addr, s)
-			if err != nil {
-				t.Fatalf("capabilities() got %v, want nil.", err)
-			}
-			if c.peerHandler != test.peerHandler {
-				t.Fatalf("capabilites() got peerHandler %v, want %v", c.peerHandler, test.peerHandler)
 			}
 		})
 	}
@@ -733,79 +590,6 @@ func TestNewServerSuccess(t *testing.T) {
 	}
 }
 
-func TestServerCapabilities(t *testing.T) {
-	h := func(ss ServerSession, rwc io.ReadWriteCloser) error { return nil }
-	rh := func(ss ServerSession) error { return nil }
-	tests := []struct {
-		name        string
-		handler     ServerHandlerFunc
-		regHandler  ServerRegHandlerFunc
-		peerHandler bool
-		sendErr     bool
-		recvErr     bool
-		wantErr     bool
-	}{
-		{
-			name:    "nilHandlers",
-			wantErr: true,
-		},
-		{
-			name:        "definedHandlers",
-			handler:     h,
-			peerHandler: true,
-		},
-		{
-			name:        "nilSendDefinedRecv",
-			peerHandler: true,
-		},
-		{
-			name:       "definedSendNilRecv",
-			handler:    h,
-			regHandler: rh,
-		},
-		{
-			name:    "failRecv",
-			recvErr: true,
-			wantErr: true,
-		},
-		{
-			name:    "failSend",
-			sendErr: true,
-			wantErr: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			s := &registerTestStream{
-				maxSends: 10,
-				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: test.peerHandler}},
-				},
-				sendErr: test.sendErr,
-				recvErr: test.recvErr,
-			}
-			var addr net.Addr
-			serv := &Server{
-				sc: ServerConfig{
-					Handler:         test.handler,
-					RegisterHandler: test.regHandler,
-				},
-				peerHandlers: make(map[net.Addr]bool),
-			}
-			err := serv.capabilities(addr, s)
-			if err != nil && !test.wantErr {
-				t.Fatalf("capabilities() got %v, want nil.", err)
-			}
-			if err == nil && test.wantErr {
-				t.Fatal("capabilities() got nil, want error.")
-			}
-			if serv.peerHandlers[addr] != test.peerHandler {
-				t.Fatalf("capabilites() got peerHandler %v, want %v", serv.peerHandlers[addr], test.peerHandler)
-			}
-		})
-	}
-}
-
 func TestServerClient(t *testing.T) {
 	s, err := NewServer(ServerConfig{})
 	if err != nil {
@@ -840,14 +624,14 @@ func TestServerClient(t *testing.T) {
 	})
 	t.Run("Get-NoEntryInMap", func(t *testing.T) {
 		var addr net.Addr
-		if got := s.client(addr); got != nil {
+		if got := s.clientInfo(addr); !got.IsZero() {
 			t.Errorf("peerHandler() got %v, want nil", got)
 		}
 	})
 	t.Run("Get-ValidEntryInMap", func(t *testing.T) {
 		var addr net.Addr
-		s.clients[addr] = rs
-		if got := s.client(addr); got != rs {
+		s.clients[addr] = clientRegInfo{rs: rs}
+		if got := s.clientInfo(addr); got.rs != rs {
 			t.Errorf("client() got %v, want %v", got, rs)
 		}
 	})
@@ -860,17 +644,15 @@ func TestServerRegister(t *testing.T) {
 	}
 	ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: addr})
 	for _, test := range []struct {
-		name       string
-		ctx        context.Context
-		sendErr    bool
-		addClient  bool
-		maxSends   int
-		streamRecv *tpb.Session
+		name      string
+		ctx       context.Context
+		sendErr   bool
+		addClient bool
+		maxSends  int
 	}{
 		{name: "NoPeer", ctx: context.Background()},
-		{name: "CapabilitiesError", ctx: ctx, sendErr: true},
-		{name: "AddClientError", ctx: ctx, addClient: true, maxSends: 10, streamRecv: &tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}}},
-		{name: "RecvError", ctx: ctx, maxSends: 10, streamRecv: &tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}}},
+		{name: "AddClientError", ctx: ctx, addClient: true, maxSends: 10},
+		{name: "RecvError", ctx: ctx, maxSends: 10},
 	} {
 		s, err := NewServer(ServerConfig{})
 		if err != nil {
@@ -886,7 +668,7 @@ func TestServerRegister(t *testing.T) {
 				ctx:        test.ctx,
 				sendErr:    test.sendErr,
 				maxSends:   test.maxSends,
-				streamRecv: []*tpb.Session{test.streamRecv},
+				streamRecv: []*tpb.RegisterOp{},
 			}); err == nil {
 				t.Fatalf("Register() want error, got %v", err)
 			}
@@ -911,7 +693,7 @@ func TestServerNewClientSession(t *testing.T) {
 		name           string
 		rh             ServerRegHandlerFunc
 		maxSends       int
-		streamRecv     []*tpb.Session
+		streamRecv     []*tpb.RegisterOp
 		blockingStream bool
 		streamErr      bool
 		addConn        bool
@@ -923,9 +705,9 @@ func TestServerNewClientSession(t *testing.T) {
 			addConn:  true,
 			maxSends: 10,
 			rh:       serverRegHandlerError,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, Error: "test error"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Error: "test error"}}},
 			},
 			streamErr: true,
 			i:         make(chan ioOrErr),
@@ -935,27 +717,27 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       serverRegHandlerError,
 			addConn:  true,
 			maxSends: 10,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 5, Error: "test error"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 5, Error: "test error"}}},
 			},
 		},
 		{
 			name:     "RegisterHandlerSendError",
 			rh:       serverRegHandlerError,
 			maxSends: 0,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 		},
 		{
 			name:     "RegisterHandlerSendSuccess",
 			rh:       serverRegHandlerError,
 			maxSends: 1,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 		},
 		{
@@ -963,9 +745,9 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       srh,
 			addConn:  true,
 			maxSends: 0,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 		},
 		{
@@ -973,18 +755,18 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:       srh,
 			addConn:  true,
 			maxSends: 1,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 		},
 		{
 			name:     "SendAckError",
 			rh:       srh,
 			maxSends: 0,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 		},
 		{
@@ -992,9 +774,9 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:             srh,
 			blockingStream: true,
 			maxSends:       1,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 			ioe: ioOrErr{err: errors.New("test error")},
 		},
@@ -1003,13 +785,13 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:             srh,
 			blockingStream: true,
 			maxSends:       3,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
-				&tpb.Session{Tag: 2, TargetId: "testTarget"},
-				&tpb.Session{Tag: 3, TargetId: "testTarget"},
-				&tpb.Session{Tag: 4, TargetId: "testTarget"},
-				&tpb.Session{Tag: 5, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 2, TargetId: "testTarget"}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 3, TargetId: "testTarget"}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 4, TargetId: "testTarget"}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 5, TargetId: "testTarget"}}},
 			},
 		},
 		{
@@ -1017,9 +799,9 @@ func TestServerNewClientSession(t *testing.T) {
 			rh:             srh,
 			blockingStream: true,
 			maxSends:       1,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 			ioe: ioOrErr{rwc: &ioStream{}},
 		},
@@ -1027,9 +809,9 @@ func TestServerNewClientSession(t *testing.T) {
 			name:     "ContextError",
 			rh:       srh,
 			maxSends: 1,
-			streamRecv: []*tpb.Session{
-				&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
-				&tpb.Session{Tag: 1, TargetId: "testTarget"},
+			streamRecv: []*tpb.RegisterOp{
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
+				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
 			},
 			ioe: ioOrErr{rwc: &ioStream{}},
 		},
@@ -1137,14 +919,13 @@ func TestServerNewSessionErrors(t *testing.T) {
 		sAddr      net.Addr
 		clientAddr net.Addr
 		rs         regStream
-		ph, conn   bool
+		conn       bool
 	}{
 		{name: "NoClients", sAddr: nil, rs: &regSafeStream{}},
 		{name: "NoStream", clientAddr: tempAddr, sAddr: addr, rs: &regSafeStream{}},
-		{name: "NoPeerHandler", clientAddr: addr, sAddr: addr, rs: &regSafeStream{}},
-		{name: "AddConnectionError", clientAddr: addr, sAddr: addr, rs: &registerTestStream{maxSends: 10}, ph: true, conn: true},
-		{name: "AddConnectionFailSend", clientAddr: addr, sAddr: addr, rs: &registerTestStream{maxSends: 0}, ph: true, conn: true},
-		{name: "StreamSendError", clientAddr: addr, sAddr: addr, rs: &registerTestStream{sendErr: true}, ph: true},
+		{name: "AddConnectionError", clientAddr: addr, sAddr: addr, rs: &registerTestStream{maxSends: 10}, conn: true},
+		{name: "AddConnectionFailSend", clientAddr: addr, sAddr: addr, rs: &registerTestStream{maxSends: 0}, conn: true},
+		{name: "StreamSendError", clientAddr: addr, sAddr: addr, rs: &registerTestStream{sendErr: true}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, err := NewServer(ServerConfig{})
@@ -1155,9 +936,6 @@ func TestServerNewSessionErrors(t *testing.T) {
 				if err := s.addClient(test.clientAddr, test.rs); err != nil {
 					t.Fatalf("failed to add client to test server: %v", err)
 				}
-			}
-			if test.ph {
-				s.addPeerHandler(test.clientAddr)
 			}
 			if test.conn {
 				if err := s.addConnection(1, test.clientAddr, make(chan ioOrErr)); err != nil {
@@ -1195,7 +973,6 @@ func TestServerNewSession(t *testing.T) {
 			if err := s.addClient(addr, &registerTestStream{maxSends: 10}); err != nil {
 				t.Fatalf("failed to add client to test server: %v", err)
 			}
-			s.addPeerHandler(addr)
 			addrL := make([]net.Addr, test.numClients)
 			if test.numClients > 0 {
 				for i := 2; i <= test.numClients; i++ {
@@ -1207,7 +984,6 @@ func TestServerNewSession(t *testing.T) {
 						t.Fatalf("failed to add client to test server: %v", err)
 					}
 					addrL = append(addrL, addr1)
-					s.addPeerHandler(addr1)
 				}
 			}
 			go func() {
@@ -1251,7 +1027,7 @@ func TestClientRunBlocked(t *testing.T) {
 	)
 	defer cancel()
 	client := &tunnelBlockingClient{}
-	c, err := NewClient(client, ClientConfig{})
+	c, err := NewClient(client, ClientConfig{}, map[Target]struct{}{})
 	if err != nil {
 		t.Fatalf("failed to create new client: %v", err)
 	}
@@ -1293,7 +1069,7 @@ func TestClientRunBlocked(t *testing.T) {
 }
 
 func TestClientRun(t *testing.T) {
-	client, err := NewClient(&tunnelClient{}, ClientConfig{})
+	client, err := NewClient(&tunnelClient{}, ClientConfig{}, map[Target]struct{}{})
 	if err != nil {
 		t.Fatalf("TestClientRun: failed to create new client: %v", err)
 	}
@@ -1341,8 +1117,8 @@ func TestClientRun(t *testing.T) {
 			tc: &tunnelClient{regStream: &registerClientStream{
 				ctx:      ctx,
 				maxSends: 10,
-				streamRecv: []*tpb.Session{
-					&tpb.Session{Capabilities: &tpb.Capabilities{Handler: true}},
+				streamRecv: []*tpb.RegisterOp{
+					&tpb.RegisterOp{},
 				},
 			}},
 			c: client,
@@ -1351,7 +1127,7 @@ func TestClientRun(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var err error
 			if test.c == nil {
-				test.c, err = NewClient(test.tc, ClientConfig{})
+				test.c, err = NewClient(test.tc, ClientConfig{}, map[Target]struct{}{})
 				if err != nil {
 					t.Fatalf("failed to create new client: %v", err)
 				}
@@ -1391,10 +1167,10 @@ func TestClientStart(t *testing.T) {
 			wantErr: true,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: false, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: false, TargetId: "testID"}}},
 					},
-					streamSend: []*tpb.Session{},
+					streamSend: []*tpb.RegisterOp{},
 				},
 			},
 		},
@@ -1403,24 +1179,24 @@ func TestClientStart(t *testing.T) {
 			wantErr: true,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, TargetId: "testID"}}},
 					},
-					streamSend: []*tpb.Session{},
+					streamSend: []*tpb.RegisterOp{},
 				},
 			},
 			cc: ClientConfig{
-				Handler: func(targetID string, rwc io.ReadWriteCloser) error {
+				Handler: func(t Target, rwc io.ReadWriteCloser) error {
 					return errors.New("test: no registered handler")
 				},
-				RegisterHandler: func(targetID string) error {
+				RegisterHandler: func(t Target) error {
 					return errors.New("test: can't handle")
 				},
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			c, err := NewClient(test.client, test.cc)
+			c, err := NewClient(test.client, test.cc, map[Target]struct{}{})
 			if err != nil {
 				t.Fatalf("NewClient() failed: %v", err)
 			}
@@ -1484,7 +1260,7 @@ func TestClientReturnedStream(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			c, err := NewClient(test.client, test.cc)
+			c, err := NewClient(test.client, test.cc, map[Target]struct{}{})
 			if err != nil {
 				t.Fatalf("NewClient() failed: %v", err)
 			}
@@ -1545,17 +1321,17 @@ func TestClientNewClientStream(t *testing.T) {
 				},
 			},
 			cc: ClientConfig{
-				Handler:         func(targetID string, rwc io.ReadWriteCloser) error { return nil },
-				RegisterHandler: func(targetID string) error { return nil },
+				Handler:         func(t Target, rwc io.ReadWriteCloser) error { return nil },
+				RegisterHandler: func(t Target) error { return nil },
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			c, err := NewClient(test.client, test.cc)
+			c, err := NewClient(test.client, test.cc, map[Target]struct{}{})
 			if err != nil {
 				t.Fatalf("NewClient() failed: %v", err)
 			}
-			err = c.newClientStream(context.Background(), 1, "testString")
+			err = c.newClientStream(context.Background(), 1, Target{ID: "testString"})
 			if err == nil && test.wantErr {
 				t.Fatal("c.newClientStream() got success, want error")
 			}
@@ -1567,10 +1343,10 @@ func TestClientNewClientStream(t *testing.T) {
 }
 
 func TestClientStreamHandler(t *testing.T) {
-	handlerError := func(targetID string, rwc io.ReadWriteCloser) error {
+	handlerError := func(t Target, rwc io.ReadWriteCloser) error {
 		return errors.New("test: no registered handler")
 	}
-	regHandlerError := func(targetID string) error {
+	regHandlerError := func(t Target) error {
 		return errors.New("test: can't handle")
 	}
 	for _, test := range []struct {
@@ -1586,8 +1362,8 @@ func TestClientStreamHandler(t *testing.T) {
 			tag:     2,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, TargetId: "testID"}}},
 					},
 					sendErr: true,
 				},
@@ -1603,10 +1379,10 @@ func TestClientStreamHandler(t *testing.T) {
 			tag:     -1,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, TargetId: "testID"}}},
 					},
-					streamSend: []*tpb.Session{},
+					streamSend: []*tpb.RegisterOp{},
 				},
 				tunStream: &tunnelClientStream{
 					sendErr: true,
@@ -1623,10 +1399,10 @@ func TestClientStreamHandler(t *testing.T) {
 			tag:  -1,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, TargetId: "testID"}}},
 					},
-					streamSend: []*tpb.Session{},
+					streamSend: []*tpb.RegisterOp{},
 				},
 				tunStream: &tunnelClientStream{
 					streamRecv: []*tpb.Data{},
@@ -1645,10 +1421,10 @@ func TestClientStreamHandler(t *testing.T) {
 			tag:     1,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, TargetId: "testID"}}},
 					},
-					streamSend: []*tpb.Session{},
+					streamSend: []*tpb.RegisterOp{},
 				},
 				tunStream: &tunnelClientStream{
 					sendErr: true,
@@ -1656,8 +1432,8 @@ func TestClientStreamHandler(t *testing.T) {
 				},
 			},
 			cc: ClientConfig{
-				Handler:         func(targetID string, rwc io.ReadWriteCloser) error { return nil },
-				RegisterHandler: func(targetID string) error { return nil },
+				Handler:         func(t Target, rwc io.ReadWriteCloser) error { return nil },
+				RegisterHandler: func(t Target) error { return nil },
 			},
 		},
 		{
@@ -1665,23 +1441,23 @@ func TestClientStreamHandler(t *testing.T) {
 			tag:  1,
 			client: &tunnelClient{
 				regStream: &registerClientStream{
-					streamRecv: []*tpb.Session{
-						&tpb.Session{Tag: 1, Accept: true, TargetId: "testID"},
+					streamRecv: []*tpb.RegisterOp{
+						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, TargetId: "testID"}}},
 					},
-					streamSend: []*tpb.Session{},
+					streamSend: []*tpb.RegisterOp{},
 				},
 				tunStream: &tunnelClientStream{
 					maxSends: 10,
 				},
 			},
 			cc: ClientConfig{
-				Handler:         func(targetID string, rwc io.ReadWriteCloser) error { return nil },
-				RegisterHandler: func(targetID string) error { return nil },
+				Handler:         func(t Target, rwc io.ReadWriteCloser) error { return nil },
+				RegisterHandler: func(t Target) error { return nil },
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			c, err := NewClient(test.client, test.cc)
+			c, err := NewClient(test.client, test.cc, map[Target]struct{}{})
 			if err != nil {
 				t.Fatalf("NewClient() failed: %v", err)
 			}
@@ -1697,7 +1473,7 @@ func TestClientStreamHandler(t *testing.T) {
 			c.addr = addr
 			retCh := make(chan ioOrErr, 1)
 			err = c.addConnection(-1, addr, retCh)
-			err = c.streamHandler(context.Background(), test.tag, "testID")
+			err = c.streamHandler(context.Background(), test.tag, Target{ID: "testID"})
 			if err == nil && test.wantErr {
 				t.Fatal("c.streamHandler() got success, want error")
 			}
@@ -1710,7 +1486,7 @@ func TestClientStreamHandler(t *testing.T) {
 
 func TestClientNewSessionClientNotStarted(t *testing.T) {
 	var tc tpb.TunnelClient
-	c, err := NewClient(tc, ClientConfig{})
+	c, err := NewClient(tc, ClientConfig{}, map[Target]struct{}{})
 	if err != nil {
 		t.Fatalf("NewClient() failed: %v", err)
 	}
@@ -1727,7 +1503,7 @@ func TestClientNewSessionAddConnectionFailure(t *testing.T) {
 		t.Fatalf("failed to resolve addr: %v", err)
 	}
 
-	c, err := NewClient(tc, ClientConfig{})
+	c, err := NewClient(tc, ClientConfig{}, map[Target]struct{}{})
 	if err != nil {
 		t.Fatalf("NewClient() failed: %v", err)
 	}
@@ -1750,7 +1526,7 @@ func TestClientNewSessionSendFailure(t *testing.T) {
 		t.Fatalf("failed to resolve addr: %v", err)
 	}
 
-	c, err := NewClient(tc, ClientConfig{})
+	c, err := NewClient(tc, ClientConfig{}, map[Target]struct{}{})
 	if err != nil {
 		t.Fatalf("NewClient() failed: %v", err)
 	}
@@ -1774,7 +1550,7 @@ func TestClientNewSessionRetChErr(t *testing.T) {
 		t.Fatalf("failed to resolve addr: %v", err)
 	}
 
-	c, err := NewClient(tc, ClientConfig{})
+	c, err := NewClient(tc, ClientConfig{}, map[Target]struct{}{})
 	if err != nil {
 		t.Fatalf("NewClient() failed: %v", err)
 	}
@@ -1783,7 +1559,7 @@ func TestClientNewSessionRetChErr(t *testing.T) {
 	c.rs = &regSafeStream{
 		regStream: &registerClientStream{
 			maxSends:   10,
-			streamRecv: []*tpb.Session{},
+			streamRecv: []*tpb.RegisterOp{},
 		},
 	}
 	go func() {
