@@ -111,9 +111,6 @@ func Run(ctx context.Context, conf Config) error {
 	addTagHandler := func(t tunnel.Target) error {
 		log.Printf("handling target addition: (%s:%s)", t.ID, t.Type)
 		targets = append(targets, t)
-		if len(targets) != 1 {
-			return fmt.Errorf("found %d targets. this exmaple only support 1", len(targets))
-		}
 		return nil
 	}
 
@@ -121,7 +118,11 @@ func Run(ctx context.Context, conf Config) error {
 		log.Printf("handling target deletion: (%s:%s)", t.ID, t.Type)
 		return nil
 	}
-	ts, err := tunnel.NewServer(tunnel.ServerConfig{AddTargetHandler: addTagHandler, DeleteTargetHandler: deleteTagHandler})
+
+	ts, err := tunnel.NewServer(tunnel.ServerConfig{
+		AddTargetHandler:    addTagHandler,
+		DeleteTargetHandler: deleteTagHandler,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create new server: %v", err)
 	}
@@ -147,6 +148,18 @@ func Run(ctx context.Context, conf Config) error {
 	go func() {
 		if err := listen(ctx, ts, conf.ListenAddress, &targets); err != nil {
 			errCh <- err
+		}
+	}()
+
+	errChTS := ts.ErrorChan()
+	go func() {
+		for {
+			select {
+			case err := <-errChTS:
+				log.Printf("tunnel serer error: %v", err)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 

@@ -42,6 +42,7 @@ message RegisterOp {
   oneof Registration {
     Target target = 1;
     Session session = 2;
+    Subscription subscription = 3;
   }
 }
 
@@ -85,4 +86,20 @@ message Session {
   // Error allows the register stream to return an error without breaking the
   // stream.
   string error = 5;
+}
+
+
+message Subscription {
+  enum SubscriptionOp {
+    UNKNOWN = 0;
+    SUBCRIBE = 1;
+    UNSUBCRIBE = 2;
+  }
+  SubscriptionOp op = 1;
+  // Used to ack the registration of (un)subscription.
+  bool accept = 2;
+  // String value of the corresponding TargetType for a standard protocol.
+  // Used to filter targets for subscription. If empty, it will subscribe all.
+  string target_type = 3;
+  string error = 4;
 }

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 
+	"github.com/openconfig/grpctunnel/bidi"
 	tpb "github.com/openconfig/grpctunnel/proto/tunnel"
 )
 
@@ -215,6 +216,35 @@ type ServerConfig struct {
 	DeleteTargetHandler ServerDeleteTargHandlerFunc
 	RegisterHandler     ServerRegHandlerFunc
 	Handler             ServerHandlerFunc
+	LocalTargets        []Target
+}
+
+func (s *Server) bridgeRegHandler(ss ServerSession) error {
+	addr := s.clientFromTarget(ss.Target)
+	if addr == nil {
+		return fmt.Errorf("failed to call bridgeRegHandler: target (%s: %s) not registered", ss.Target.ID, ss.Target.Type)
+	}
+	if addr == ss.Addr {
+		return fmt.Errorf("failed to call bridgeRegHandler: address (%s) of the target is the same as the session", addr)
+	}
+	return nil
+}
+
+func (s *Server) bridgeHandler(ss ServerSession, rwc io.ReadWriteCloser) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addr := s.clientFromTarget(ss.Target)
+	session, err := s.NewSession(ctx, ServerSession{Target: ss.Target, Addr: addr})
+	if err != nil {
+		return fmt.Errorf("error creating new session: %v", err)
+	}
+
+	if err = bidi.Copy(session, rwc); err != nil {
+		return fmt.Errorf("error from bidi copy: %v", err)
+	}
+
+	return nil
 }
 
 // ServerSession is used by NewSession and the register handler. In the register
@@ -251,8 +281,14 @@ type Server struct {
 	cmu     sync.RWMutex
 	clients map[net.Addr]clientRegInfo
 
-	tmu     sync.RWMutex
-	targets map[Target]net.Addr
+	tmu      sync.RWMutex
+	rTargets map[Target]net.Addr // remote targets
+	lTargets map[Target]struct{} // local targets
+
+	smu sync.RWMutex
+	sub map[net.Addr]map[string]struct{} // subscription information
+
+	errCh chan error // for logging server errors without disruptting the tunnel
 }
 
 // NewServer creates a new tunnel server.
@@ -260,15 +296,22 @@ func NewServer(sc ServerConfig) (*Server, error) {
 	if (sc.RegisterHandler == nil) != (sc.Handler == nil) {
 		return nil, errors.New("tunnel: can't create server: only 1 handler set")
 	}
+	lTargets := make(map[Target]struct{})
+	for _, t := range sc.LocalTargets {
+		lTargets[t] = struct{}{}
+	}
 	return &Server{
-		clients: make(map[net.Addr]clientRegInfo),
-		targets: make(map[Target]net.Addr),
-		sc:      sc,
+		clients:  make(map[net.Addr]clientRegInfo),
+		rTargets: make(map[Target]net.Addr),
+		lTargets: lTargets,
+		sc:       sc,
 		endpoint: endpoint{
 			tag:       1,
 			conns:     make(map[session]chan ioOrErr),
 			increment: 1,
 		},
+		sub:   map[net.Addr]map[string]struct{}{},
+		errCh: make(chan error),
 	}, nil
 }
 
@@ -276,25 +319,39 @@ func NewServer(sc ServerConfig) (*Server, error) {
 func (s *Server) clientInfo(addr net.Addr) clientRegInfo {
 	s.cmu.RLock()
 	defer s.cmu.RUnlock()
-
 	return s.clients[addr]
 }
 
-// clientTargets returns all the targets of a given client.
+// clientTargets returns all the targets of a given client. If addr is nil, return all the targets.
 func (s *Server) clientTargets(addr net.Addr) map[Target]struct{} {
 	s.cmu.RLock()
 	defer s.cmu.RUnlock()
+	// Make a deep copy.
+	targets := make(map[Target]struct{})
+
+	if addr == nil {
+		for t := range s.rTargets {
+			targets[t] = struct{}{}
+		}
+		return targets
+	}
 
 	info, ok := s.clients[addr]
 	if !ok {
 		return nil
 	}
-	// Make a deep copy.
-	targets := make(map[Target]struct{})
+
 	for t := range info.targets {
 		targets[t] = struct{}{}
 	}
 	return targets
+}
+
+func (s *Server) clientFromTarget(t Target) net.Addr {
+	s.tmu.RLock()
+	defer s.tmu.RUnlock()
+
+	return s.rTargets[t]
 }
 
 // addClient adds a client to the clients map.
@@ -313,7 +370,6 @@ func (s *Server) addClient(addr net.Addr, rs regStream) error {
 func (s *Server) deleteClient(addr net.Addr) {
 	s.cmu.Lock()
 	defer s.cmu.Unlock()
-
 	clientInfo, ok := s.clients[addr]
 	if !ok {
 		return
@@ -337,10 +393,10 @@ func (s *Server) addTargetToMap(addr net.Addr, t Target) error {
 	s.tmu.Lock()
 	defer s.tmu.Unlock()
 
-	if c, ok := s.targets[t]; ok {
+	if c, ok := s.rTargets[t]; ok {
 		return fmt.Errorf("target %q already registered for client %q", t.ID, c)
 	}
-	s.targets[t] = addr
+	s.rTargets[t] = addr
 	return nil
 }
 
@@ -349,11 +405,11 @@ func (s *Server) deleteTargetFromMap(t Target) error {
 	s.tmu.Lock()
 	defer s.tmu.Unlock()
 
-	if c, ok := s.targets[t]; !ok {
+	if c, ok := s.rTargets[t]; !ok {
 		return fmt.Errorf("target %q is not registered for client %q", t.ID, c)
 	}
 
-	delete(s.targets, t)
+	delete(s.rTargets, t)
 	return nil
 }
 
@@ -376,26 +432,33 @@ func (s *Server) deleteTargetFromClient(addr net.Addr, t Target) {
 // addTarget registers a target for a given client. It registers
 // is in the clients map and targets map.
 func (s *Server) addTarget(addr net.Addr, target *tpb.Target) error {
+	t := Target{ID: target.TargetId, Type: target.TargetType}
 	clientInfo := s.clientInfo(addr)
-
 	if clientInfo.IsZero() {
 		return fmt.Errorf("client %q not registered", addr)
 	}
 	rs := clientInfo.rs
-	t := Target{ID: target.TargetId, Type: target.TargetType}
+
+	if _, ok := s.lTargets[t]; ok {
+		err := fmt.Errorf("target (%s, %s) clashes with server's local target", t.ID, t.Type)
+		if err := rs.Send(errorTargetRegisterOp(target.TargetId, target.TargetType, err.Error())); err != nil {
+			return fmt.Errorf("failed to send session error: %v", err)
+		}
+		return err
+	}
 
 	targets := s.clientTargets(addr)
 	if _, ok := targets[t]; ok {
 		err := fmt.Errorf("target %q already registered in s.clients", t)
 		if err := rs.Send(errorTargetRegisterOp(target.TargetId, target.TargetType, err.Error())); err != nil {
-			return fmt.Errorf("failed to send session ack: %v", err)
+			return fmt.Errorf("failed to send session error: %v", err)
 		}
 		return err
 	}
 
 	if err := s.addTargetToMap(addr, t); err != nil {
 		if err := rs.Send(errorTargetRegisterOp(target.TargetId, target.TargetType, err.Error())); err != nil {
-			return fmt.Errorf("failed to send session ack: %v", err)
+			return fmt.Errorf("failed to send session error: %v", err)
 		}
 		return err
 	}
@@ -410,11 +473,200 @@ func (s *Server) addTarget(addr net.Addr, target *tpb.Target) error {
 		return fmt.Errorf("failed to send session ack: %v", err)
 	}
 
-	if s.sc.AddTargetHandler == nil {
+	if s.sc.AddTargetHandler != nil {
+		if err := s.sc.AddTargetHandler(t); err != nil {
+			return fmt.Errorf("failed to cal addTargetHandler: %v", err)
+		}
+	}
+
+	if err := s.sendUpdates(t, true); err != nil {
+		return fmt.Errorf("failed to send target subscription updates: %v", err)
+	}
+
+	return nil
+}
+
+func (s *Server) handleSubscription(addr net.Addr, sub *tpb.Subscription) error {
+	switch op := sub.GetOp(); op {
+	case tpb.Subscription_SUBCRIBE:
+		return s.subscribe(addr, sub)
+	case tpb.Subscription_UNSUBCRIBE:
+		return s.unsubscribe(addr, sub)
+	default:
+		return fmt.Errorf("invalid subcription op: %d", op)
+	}
+}
+
+func (s *Server) addSubscription(addr net.Addr, typ string) error {
+	s.smu.Lock()
+	defer s.smu.Unlock()
+
+	ts, ok := s.sub[addr]
+	if !ok {
+		s.sub[addr] = make(map[string]struct{})
+	}
+	if _, ok := ts[typ]; ok {
+		return fmt.Errorf("%s is already subscribed by %s", typ, addr)
+	}
+
+	s.sub[addr][typ] = struct{}{}
+	return nil
+}
+
+func (s *Server) subscribe(addr net.Addr, sub *tpb.Subscription) error {
+
+	targets := s.clientTargets(nil)
+	// Combine with local targets.
+	for t := range s.lTargets {
+		targets[t] = struct{}{}
+	}
+	allTypes := map[string]struct{}{}
+	for t := range targets {
+		allTypes[t.Type] = struct{}{}
+	}
+
+	for typ := range allTypes {
+		if sub.TargetType != "" && sub.TargetType != typ {
+			continue
+		}
+
+		if err := s.addSubscription(addr, typ); err != nil {
+			clientInfo := s.clientInfo(addr)
+			if clientInfo.IsZero() {
+				return fmt.Errorf("client %q not registered", addr)
+			}
+			rs := clientInfo.rs
+
+			if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{Subscription: &tpb.Subscription{
+				TargetType: sub.TargetType,
+				Error:      err.Error(),
+				Op:         sub.Op,
+			}}}); err != nil {
+				return fmt.Errorf("failed to send session error: %v", err)
+			}
+		}
+	}
+
+	// Send the initial updates.
+	for t := range targets {
+		if sub.TargetType == "" || sub.TargetType == t.Type {
+			if err := s.sendUpdate(addr, t, true); err != nil {
+				return fmt.Errorf("failed to send initial updates for subscription from %s: %v", addr, err)
+			}
+		}
+	}
+
+	// Send ack.
+	clientInfo := s.clientInfo(addr)
+	rs := clientInfo.rs
+	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
+		Subscription: &tpb.Subscription{
+			TargetType: sub.TargetType,
+			Op:         sub.Op,
+			Accept:     true}}}); err != nil {
+		return fmt.Errorf("failed to send subscription ack for %s: %v", addr, err)
+	}
+
+	return nil
+}
+
+func (s *Server) deleteSubscriber(addr net.Addr, sub *tpb.Subscription) error {
+	s.smu.Lock()
+	defer s.smu.Unlock()
+
+	if _, ok := s.sub[addr]; !ok {
+		return fmt.Errorf("client %s is not in subscription list", addr)
+	}
+
+	if sub.TargetType == "" {
+		delete(s.sub, addr)
 		return nil
 	}
 
-	return s.sc.AddTargetHandler(Target{ID: target.TargetId, Type: target.TargetType})
+	delete(s.sub[addr], sub.TargetType)
+	return nil
+}
+
+func (s *Server) unsubscribe(addr net.Addr, sub *tpb.Subscription) error {
+	clientInfo := s.clientInfo(addr)
+	if clientInfo.IsZero() {
+		return fmt.Errorf("client %s is not registered", addr)
+	}
+	rs := clientInfo.rs
+
+	if err := s.deleteSubscriber(addr, sub); err != nil {
+		if e := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
+			Subscription: &tpb.Subscription{
+				TargetType: sub.TargetType,
+				Op:         sub.Op,
+				Accept:     true}}}); e != nil {
+			return fmt.Errorf("failed to send unsubscription ack for %s: %v", addr, err)
+		}
+		return err
+	}
+
+	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
+		Subscription: &tpb.Subscription{
+			TargetType: sub.TargetType,
+			Op:         sub.Op,
+			Accept:     true}}}); err != nil {
+		return fmt.Errorf("failed to send unsubscription ack for %s: %v", addr, err)
+	}
+	return nil
+}
+
+func (s *Server) subscribers(typ string) map[net.Addr]struct{} {
+	s.smu.RLock()
+	defer s.smu.RUnlock()
+	sbs := make(map[net.Addr]struct{})
+
+	for a, ts := range s.sub {
+		if typ == "" {
+			sbs[a] = struct{}{}
+		} else if _, ok := ts[typ]; ok {
+			sbs[a] = struct{}{}
+		}
+	}
+	return sbs
+}
+
+func (s *Server) sendUpdate(addr net.Addr, target Target, add bool) error {
+	op := tpb.Target_ADD
+	if !add {
+		op = tpb.Target_REMOVE
+	}
+
+	clientInfo := s.clientInfo(addr)
+	rs := clientInfo.rs
+	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
+		TargetId:   target.ID,
+		TargetType: target.Type,
+		Op:         op,
+	}}}); err != nil {
+		return fmt.Errorf("failed to send subscription update for %s: %v", addr, err)
+	}
+
+	return nil
+}
+
+func (s *Server) sendUpdates(target Target, add bool) error {
+	addrs := s.subscribers(target.Type)
+
+	if addrs == nil {
+		return nil
+	}
+
+	var e error
+	for addr := range addrs {
+		if err := s.sendUpdate(addr, target, add); err != nil {
+			if e != nil {
+				e = err
+			} else {
+				e = fmt.Errorf("%s\n%s", err, e)
+			}
+		}
+	}
+	return e
 }
 
 // deleteTarget unregisters a target for a given client. It unregisters
@@ -447,7 +699,6 @@ func (s *Server) deleteTarget(addr net.Addr, target *tpb.Target, ack bool) error
 	}
 
 	s.deleteTargetFromClient(addr, t)
-
 	if ack {
 		if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
 			TargetId:   target.TargetId,
@@ -458,10 +709,13 @@ func (s *Server) deleteTarget(addr net.Addr, target *tpb.Target, ack bool) error
 		}
 	}
 
-	if s.sc.AddTargetHandler != nil {
-		if err := s.sc.AddTargetHandler(t); err != nil {
+	if s.sc.DeleteTargetHandler != nil {
+		if err := s.sc.DeleteTargetHandler(t); err != nil {
 			return fmt.Errorf("error calling target deletion handler client: %v", err)
 		}
+	}
+	if err := s.sendUpdates(t, false); err != nil {
+		return fmt.Errorf("failed to send target subscription updates: %v", err)
 	}
 
 	return nil
@@ -481,21 +735,31 @@ func (s *Server) handleTarget(addr net.Addr, target *tpb.Target) error {
 
 // deleteTargets unregisters all targets of a given client.
 func (s *Server) deleteTargets(addr net.Addr, ack bool) error {
-	s.cmu.Lock()
-	defer s.cmu.Unlock()
-
-	if _, ok := s.clients[addr]; ok {
+	if clientInfo := s.clientInfo(addr); clientInfo.IsZero() {
 		e := fmt.Errorf("client %q not registered", addr)
 		return e
 	}
 
-	for target := range s.clients[addr].targets {
+	for target := range s.clientTargets(addr) {
 		t := tpb.Target{TargetId: target.ID, TargetType: target.Type}
 		if err := s.deleteTarget(addr, &t, ack); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// sendError receives error from Register in a non-blocking way.
+func (s *Server) sendError(err error) {
+	select {
+	case s.errCh <- err:
+	default: // default do nothing, so it won't be blocking
+	}
+}
+
+// ErrorChan returns a channel that sends errors from the operations such as Register.
+func (s *Server) ErrorChan() <-chan error {
+	return s.errCh
 }
 
 // Register handles the gRPC register stream(s).
@@ -516,87 +780,101 @@ func (s *Server) Register(stream tpb.Tunnel_RegisterServer) error {
 	defer cancel()
 	defer s.deleteTargets(p.Addr, false)
 
-	// The loop within this goroutine will return when an error is received which
-	// streamErr is unavailable to receive. This will happen when ctx is canceled.
 	// The loop will handle target registration and new sessions based on the
-	// registration stream type.
-	streamErr := make(chan error, 1)
-	go func() {
-		for {
-			reg, err := rs.Recv()
-			if err != nil {
-				select {
-				case streamErr <- err:
-				default:
-				}
-				return
-			}
-			switch reg.Registration.(type) {
-			case *tpb.RegisterOp_Session:
-				go func(session *tpb.Session) {
-					if err := s.newClientSession(ctx, session, p.Addr, rs); err != nil {
-						streamErr <- err
-					}
-				}(reg.GetSession())
-			case *tpb.RegisterOp_Target:
-				go func(target *tpb.Target) {
-					if err := s.handleTarget(p.Addr, target); err != nil {
-						streamErr <- err
-					}
-				}(reg.GetTarget())
-			default:
-				streamErr <- fmt.Errorf("unknown registration op from %s: %s", p.Addr, reg.Registration)
-				return
-			}
+	// registration stream type. It will ignore errors and only return if
+	// Recv from regstream failed.
+	for {
+		reg, err := rs.Recv()
+		if err != nil {
+			return err
 		}
-	}()
-	return <-streamErr
+		switch reg.Registration.(type) {
+		case *tpb.RegisterOp_Session:
+			s.newClientSession(ctx, reg.GetSession(), p.Addr, rs)
+		case *tpb.RegisterOp_Target:
+			if err := s.handleTarget(p.Addr, reg.GetTarget()); err != nil {
+				s.sendError(fmt.Errorf("failed to handle target resigtration: %v", err))
+			}
+		case *tpb.RegisterOp_Subscription:
+			if err := s.handleSubscription(p.Addr, reg.GetSubscription()); err != nil {
+				s.sendError(fmt.Errorf("failed to handle subscription resigtration: %v", err))
+			}
+		default:
+			s.sendError(fmt.Errorf("unknown registration op from %s: %s", p.Addr, reg.Registration))
+		}
+	}
+
 }
 
-func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, addr net.Addr, rs regStream) error {
+func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, addr net.Addr, rs regStream) {
 	tag := session.GetTag()
 	if session.GetError() != "" {
 		if ch := s.connection(tag, addr); ch != nil {
 			ch <- ioOrErr{err: errors.New(session.GetError())}
-			return nil
+			return
 		}
-		return fmt.Errorf("no connection associated with tag: %v", tag)
+		s.sendError(fmt.Errorf("no connection associated with tag: %v", tag))
+		return
 	}
 
-	targetID := session.TargetId
-	targetType := session.TargetType
-	if err := s.sc.RegisterHandler(ServerSession{addr, Target{ID: targetID, Type: targetType}}); err != nil {
+	var err error
+	t := Target{ID: session.TargetId, Type: session.TargetType}
+	// If client is requesting a remote target, only call the bridge register handler.
+	// We might extend it to allow calling the customized handler in the future.
+	if _, ok := s.rTargets[t]; ok {
+		err = s.bridgeRegHandler(ServerSession{addr, t})
+	} else {
+		err = s.sc.RegisterHandler(ServerSession{addr, t})
+	}
+	if err != nil {
 		if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: tag, Error: err.Error()}}}); err != nil {
-			return fmt.Errorf("failed to send session error: %v", err)
+			s.sendError(fmt.Errorf("failed to send session error: %v", err))
+			return
 		}
-		return nil
+		return
 	}
 
 	retCh := make(chan ioOrErr)
 	if err := s.addConnection(tag, addr, retCh); err != nil {
 		if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: tag, Error: err.Error()}}}); err != nil {
-			return fmt.Errorf("failed to send session error: %v", err)
+			s.sendError(fmt.Errorf("failed to send session error: %v", err))
+			return
 		}
-		return nil
+		return
 	}
 
 	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{
 		Tag:        session.Tag,
 		Accept:     true,
-		TargetId:   targetID,
-		TargetType: targetType,
+		TargetId:   session.TargetId,
+		TargetType: session.TargetType,
 	}}}); err != nil {
-		return fmt.Errorf("failed to send session ack: %v", err)
+		s.sendError(fmt.Errorf("failed to send session ack: %v", err))
+		return
 	}
 	// ctx is a child of the register stream's context
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		s.sendError(ctx.Err())
+		return
 	case ioe := <-retCh:
 		if ioe.err != nil {
-			return nil
+			return
 		}
-		return s.sc.Handler(ServerSession{addr, Target{ID: targetID, Type: targetType}}, ioe.rwc)
+		go func() {
+			// If client is requesting a remote target, only call the bridge handler.
+			// We might extend it to allow calling the customized handler in the future.
+			var err error
+			if _, ok := s.rTargets[t]; ok {
+				err = s.bridgeHandler(ServerSession{addr, t}, ioe.rwc)
+			} else {
+				err = s.sc.Handler(ServerSession{addr, t}, ioe.rwc)
+			}
+			if err != nil {
+				s.sendError(err)
+			}
+			return
+		}()
 	}
 }
 
@@ -643,6 +921,80 @@ func (c *Client) DeleteTarget(target Target) error {
 		Op:         tpb.Target_REMOVE,
 		TargetType: target.Type,
 	}}})
+}
+
+// Subscribe send a subscription request to the server for targets updates.
+func (c *Client) Subscribe(typ string) error {
+	c.pmu.Lock()
+	defer c.pmu.Unlock()
+
+	if _, ok := c.peerTypeTargets[typ]; !ok {
+		c.peerTypeTargets[typ] = make(map[Target]struct{})
+	}
+
+	return c.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{Subscription: &tpb.Subscription{
+		Op:         tpb.Subscription_SUBCRIBE,
+		TargetType: typ,
+	}}})
+}
+
+// Unsubscribe send a unsubscription request to the server for stopping receiving targets updates.
+func (c *Client) Unsubscribe(typ string) error {
+	c.pmu.Lock()
+	defer c.pmu.Unlock()
+
+	if _, ok := c.peerTypeTargets[typ]; !ok {
+		return fmt.Errorf("target type %s is not subscribed yet", typ)
+	}
+
+	return c.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{Subscription: &tpb.Subscription{
+		Op:         tpb.Subscription_UNSUBCRIBE,
+		TargetType: typ,
+	}}})
+}
+
+func (c *Client) addPeerTarget(t *tpb.Target) error {
+	c.pmu.Lock()
+	defer c.pmu.Unlock()
+
+	// Skip itself.
+	if _, ok := c.targets[Target{ID: t.TargetId, Type: t.TargetType}]; ok {
+		return nil
+	}
+
+	if _, ok := c.peerTypeTargets[t.TargetType]; !ok {
+		c.peerTypeTargets[t.TargetType] = make(map[Target]struct{})
+	}
+
+	c.peerTypeTargets[t.TargetType][Target{ID: t.TargetId, Type: t.TargetType}] = struct{}{}
+
+	return c.cc.PeerAddHandler(Target{ID: t.TargetId, Type: t.TargetType})
+}
+
+// PeerTargets returns all the peer targets matching the given type. If type is an empty string, it will return all targets.
+func (c *Client) PeerTargets(typ string) map[Target]struct{} {
+	c.pmu.Lock()
+	defer c.pmu.Unlock()
+
+	targets := make(map[Target]struct{})
+	for tp, ts := range c.peerTypeTargets {
+		if tp == typ || typ == "" {
+			for t := range ts {
+				targets[t] = struct{}{}
+			}
+		}
+	}
+	return targets
+}
+
+func (c *Client) deletePeerTarget(t *tpb.Target) error {
+	c.pmu.Lock()
+	defer c.pmu.Unlock()
+
+	if _, ok := c.peerTypeTargets[t.TargetType]; !ok {
+		delete(c.peerTypeTargets[t.TargetType], Target{ID: t.TargetId, Type: t.TargetType})
+	}
+	return c.cc.PeerDelHandler(Target{ID: t.TargetId, Type: t.TargetType})
 }
 
 // NewSession requests a new stream identified on the client side by uniqueID.
@@ -724,6 +1076,12 @@ func (s *Server) handleSession(ctx context.Context, tag int32, addr net.Addr, ta
 	}
 }
 
+// ClientPeerAddHandlerFunc is called when a peer target is registered.
+type ClientPeerAddHandlerFunc func(target Target) error
+
+// ClientPeerDelHandlerFunc is called when a peer target is deleted.
+type ClientPeerDelHandlerFunc func(target Target) error
+
 // ClientRegHandlerFunc defines the targetIDs that the handler function can accept.
 type ClientRegHandlerFunc func(target Target) error
 
@@ -734,7 +1092,10 @@ type ClientHandlerFunc func(target Target, rwc io.ReadWriteCloser) error
 type ClientConfig struct {
 	RegisterHandler ClientRegHandlerFunc
 	Handler         ClientHandlerFunc
+	PeerAddHandler  ClientPeerAddHandlerFunc
+	PeerDelHandler  ClientPeerDelHandlerFunc
 	Opts            []grpc.CallOption
+	Subscriptions   []string
 }
 
 // Client implementation of an endpoint.
@@ -751,6 +1112,9 @@ type Client struct {
 	addr net.Addr // peer address to use in endpoint map
 
 	targets map[Target]struct{}
+
+	pmu             sync.RWMutex
+	peerTypeTargets map[string]map[Target]struct{}
 }
 
 // NewClient creates a new tunnel client.
@@ -758,6 +1122,12 @@ func NewClient(tc tpb.TunnelClient, cc ClientConfig, ts map[Target]struct{}) (*C
 	if (cc.RegisterHandler == nil) != (cc.Handler == nil) {
 		return nil, errors.New("tunnel: can't create client: only 1 handler set")
 	}
+
+	peerTypeTargets := make(map[string]map[Target]struct{})
+	for _, typ := range cc.Subscriptions {
+		peerTypeTargets[typ] = make(map[Target]struct{})
+	}
+
 	return &Client{
 		block: make(chan struct{}, 1),
 		tc:    tc,
@@ -767,14 +1137,15 @@ func NewClient(tc tpb.TunnelClient, cc ClientConfig, ts map[Target]struct{}) (*C
 			conns:     make(map[session]chan ioOrErr),
 			increment: -1,
 		},
-		targets:    ts,
-		Registered: false,
+		targets:         ts,
+		Registered:      false,
+		peerTypeTargets: peerTypeTargets,
 	}, nil
 }
 
 // NewSession requests a new stream identified on the server side
 // by targetID.
-func (c *Client) NewSession(targetID string) (_ io.ReadWriteCloser, err error) {
+func (c *Client) NewSession(target Target) (_ io.ReadWriteCloser, err error) {
 	c.cmu.RLock()
 	defer c.cmu.RUnlock()
 	if c.addr == nil {
@@ -790,7 +1161,11 @@ func (c *Client) NewSession(targetID string) (_ io.ReadWriteCloser, err error) {
 			c.deleteConnection(tag, c.addr)
 		}
 	}()
-	if err = c.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: tag, TargetId: targetID}}}); err != nil {
+	if err = c.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{
+		Tag:        tag,
+		TargetId:   target.ID,
+		TargetType: target.Type,
+	}}}); err != nil {
 		return nil, err
 	}
 	ioe := <-retCh
@@ -827,6 +1202,11 @@ func (c *Client) Run(ctx context.Context) error {
 			for target := range c.targets {
 				c.NewTarget(target)
 			}
+
+			for typ := range c.peerTypeTargets {
+				c.Subscribe(typ)
+			}
+
 			return nil
 		}
 
@@ -878,12 +1258,36 @@ func (c *Client) start(ctx context.Context) error {
 				}()
 			case *tpb.RegisterOp_Target:
 				target := reg.GetTarget()
-				if !target.GetAccept() {
-					select {
-					case errCh <- fmt.Errorf("target registration (%s, %s) not accepted by server", target.TargetId, target.TargetType):
-					default:
+				switch op := target.GetOp(); op {
+				case tpb.Target_ADD:
+					if err := c.addPeerTarget(target); err != nil {
+						errCh <- fmt.Errorf("failed to add peer target: %v", err)
 					}
-					return
+				case tpb.Target_REMOVE:
+					if err := c.deletePeerTarget(target); err != nil {
+						errCh <- fmt.Errorf("failed to delete peer target: %v", err)
+					}
+				default:
+					// The rest are acks.
+					if !target.GetAccept() {
+						select {
+						case errCh <- fmt.Errorf("target registration (%s, %s) not accepted by server", target.TargetId, target.TargetType):
+						default:
+						}
+						return
+					}
+				}
+			case *tpb.RegisterOp_Subscription:
+				sub := reg.GetSubscription()
+				op := sub.GetOp()
+				if op == tpb.Subscription_SUBCRIBE || op == tpb.Subscription_UNSUBCRIBE {
+					if !sub.GetAccept() {
+						select {
+						case errCh <- fmt.Errorf("subscription request (%s) not accepted by server", sub.TargetType):
+						default:
+						}
+						return
+					}
 				}
 			}
 		}

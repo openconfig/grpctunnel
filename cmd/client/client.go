@@ -36,7 +36,50 @@ import (
 
 // Config defines the parameters to run a tunnel client.
 type Config struct {
-	TunnelAddress, DialAddress, CertFile, Target, TargetType string
+	TunnelAddress, DialAddress, ListenAddress, CertFile, Target, TargetType string
+	Bridge                                                                  bool
+}
+
+func listen(ctx context.Context, c *tunnel.Client, listenAddress string, target tunnel.Target) error {
+	l, err := net.Listen("tcp", listenAddress)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %s: %v", listenAddress, err)
+	}
+	defer l.Close()
+
+	errCh := make(chan error)
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				select {
+				case errCh <- fmt.Errorf("failed to accept connection: %v", err):
+				default:
+				}
+				return
+			}
+			// Errors from this goroutine will be logged only, because we don't want an
+			// underlying stream issue to tear the server down
+			go func(conn net.Conn) {
+				defer conn.Close()
+				session, err := c.NewSession(target)
+				if err != nil {
+					log.Printf("error from new session: %v", err)
+					return
+				}
+				if err = bidi.Copy(session, conn); err != nil {
+					log.Printf("error from bidi copy: %v", err)
+				}
+			}(conn)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
 }
 
 // Run starts a tunnel client, connecting to the tunnel server via the provided tunnel address.
@@ -81,16 +124,65 @@ func Run(ctx context.Context, conf Config) error {
 		return nil
 	}
 
+	peerAddCh := make(chan tunnel.Target, 1)
+	peerAddHandler := func(t tunnel.Target) error {
+		peerAddCh <- t
+		return nil
+	}
+
+	peerDelCh := make(chan tunnel.Target, 1)
+	peerDelHandler := func(t tunnel.Target) error {
+		peerDelCh <- t
+		return nil
+	}
+
 	targets := make(map[tunnel.Target]struct{})
 	t := tunnel.Target{ID: conf.Target, Type: conf.TargetType}
 	targets[t] = struct{}{}
 	client, err := tunnel.NewClient(tpb.NewTunnelClient(clientConn), tunnel.ClientConfig{
 		RegisterHandler: registerHandler,
 		Handler:         handler,
+		Subscriptions:   []string{conf.TargetType},
+		PeerAddHandler:  peerAddHandler,
+		PeerDelHandler:  peerDelHandler,
 	}, targets)
 
 	if err != nil {
 		return fmt.Errorf("failed to create tunnel client: %v", err)
 	}
-	return client.Run(ctx)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 2)
+	go func() {
+		err := client.Run(ctx)
+		if err != nil {
+			errCh <- err
+		}
+	}()
+
+	// If running bridge mode, pick peer targets sequentially.
+	if conf.Bridge {
+		cancels := make(map[tunnel.Target]func())
+		select {
+		case target := <-peerAddCh:
+			ctx, cancels[target] = context.WithCancel(ctx)
+			if err := listen(ctx, client, conf.ListenAddress, target); err != nil {
+				errCh <- err
+				cancels[target]()
+			}
+		case target := <-peerDelCh:
+			cancels[target]()
+			delete(cancels, target)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
+
 }

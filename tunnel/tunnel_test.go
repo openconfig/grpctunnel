@@ -676,185 +676,6 @@ func TestServerRegister(t *testing.T) {
 	}
 }
 
-func TestServerNewClientSession(t *testing.T) {
-	serverRegHandlerError := func(ss ServerSession) error {
-		return errors.New("test: no registered handler")
-	}
-	serverHandlerError := func(ss ServerSession, rwc io.ReadWriteCloser) error {
-		return errors.New("test: can't handle")
-	}
-	srh := func(ss ServerSession) error { return nil }
-	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:45000")
-	if err != nil {
-		t.Fatalf("failed to resolve address: %v", err)
-	}
-	ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: addr})
-	for _, test := range []struct {
-		name           string
-		rh             ServerRegHandlerFunc
-		maxSends       int
-		streamRecv     []*tpb.RegisterOp
-		blockingStream bool
-		streamErr      bool
-		addConn        bool
-		ioe            ioOrErr
-		i              chan ioOrErr
-	}{
-		{
-			name:     "SessionError",
-			addConn:  true,
-			maxSends: 10,
-			rh:       serverRegHandlerError,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Error: "test error"}}},
-			},
-			streamErr: true,
-			i:         make(chan ioOrErr),
-		},
-		{
-			name:     "NoAssociatedConnection",
-			rh:       serverRegHandlerError,
-			addConn:  true,
-			maxSends: 10,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 5, Error: "test error"}}},
-			},
-		},
-		{
-			name:     "RegisterHandlerSendError",
-			rh:       serverRegHandlerError,
-			maxSends: 0,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-		},
-		{
-			name:     "RegisterHandlerSendSuccess",
-			rh:       serverRegHandlerError,
-			maxSends: 1,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-		},
-		{
-			name:     "AddConnectionSendError",
-			rh:       srh,
-			addConn:  true,
-			maxSends: 0,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-		},
-		{
-			name:     "AddConnectionSendSuccess",
-			rh:       srh,
-			addConn:  true,
-			maxSends: 1,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-		},
-		{
-			name:     "SendAckError",
-			rh:       srh,
-			maxSends: 0,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-		},
-		{
-			name:           "ReturnedError",
-			rh:             srh,
-			blockingStream: true,
-			maxSends:       1,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-			ioe: ioOrErr{err: errors.New("test error")},
-		},
-		{
-			name:           "ReturnedError",
-			rh:             srh,
-			blockingStream: true,
-			maxSends:       3,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 2, TargetId: "testTarget"}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 3, TargetId: "testTarget"}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 4, TargetId: "testTarget"}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 5, TargetId: "testTarget"}}},
-			},
-		},
-		{
-			name:           "HandlerError",
-			rh:             srh,
-			blockingStream: true,
-			maxSends:       1,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-			ioe: ioOrErr{rwc: &ioStream{}},
-		},
-		{
-			name:     "ContextError",
-			rh:       srh,
-			maxSends: 1,
-			streamRecv: []*tpb.RegisterOp{
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{}}},
-				&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, TargetId: "testTarget"}}},
-			},
-			ioe: ioOrErr{rwc: &ioStream{}},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			s, err := NewServer(ServerConfig{Handler: serverHandlerError, RegisterHandler: test.rh})
-			if err != nil {
-				t.Fatalf("NewServer(ServerConfig{Handler, RegisterHandler)) failed: %v", err)
-			}
-			ctx, cancel := context.WithCancel(ctx)
-			defer cancel()
-			rts := &registerTestStream{ctx: ctx, maxSends: test.maxSends, streamRecv: test.streamRecv}
-			var rs tpb.Tunnel_RegisterServer
-			rs = rts
-			if test.blockingStream {
-				rs = &regTestStreamBlocking{registerTestStream: rts}
-			}
-			if test.addConn {
-				s.addConnection(1, addr, test.i)
-			}
-			if test.ioe.rwc != nil || test.ioe.err != nil {
-				go func() {
-					ch := s.connection(1, addr)
-					for ch == nil {
-						ch = s.connection(1, addr)
-					}
-					ch <- test.ioe
-					cancel()
-				}()
-			}
-			if err := s.Register(rs); err == nil {
-				t.Fatalf("Register() want error, got %v", err)
-			}
-			if test.streamErr {
-				ioe := <-test.i
-				if ioe.err == nil {
-					t.Fatalf("session.GetError() want error, got %v", err)
-				}
-			}
-		})
-	}
-}
-
 func TestServerTunnelError(t *testing.T) {
 	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:45000")
 	if err != nil {
@@ -1490,7 +1311,7 @@ func TestClientNewSessionClientNotStarted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient() failed: %v", err)
 	}
-	_, err = c.NewSession("")
+	_, err = c.NewSession(Target{})
 	if err == nil {
 		t.Fatalf("NewSession() got success, wanted error: %v", err)
 	}
@@ -1513,7 +1334,7 @@ func TestClientNewSessionAddConnectionFailure(t *testing.T) {
 		t.Fatalf("AddConnection() failed: %v", err)
 	}
 
-	_, err = c.NewSession("")
+	_, err = c.NewSession(Target{})
 	if err == nil {
 		t.Fatalf("NewSession() got success, wanted error: %v", err)
 	}
@@ -1537,7 +1358,7 @@ func TestClientNewSessionSendFailure(t *testing.T) {
 			sendErr: true,
 		},
 	}
-	_, err = c.NewSession("")
+	_, err = c.NewSession(Target{})
 	if err == nil {
 		t.Fatalf("NewSession() got success, wanted error: %v", err)
 	}
@@ -1569,7 +1390,7 @@ func TestClientNewSessionRetChErr(t *testing.T) {
 		}
 		ioe <- ioOrErr{err: errors.New("test error")}
 	}()
-	_, err = c.NewSession("")
+	_, err = c.NewSession(Target{})
 	if err == nil {
 		t.Fatalf("NewSession() got success, wanted error: %v", err)
 	}
