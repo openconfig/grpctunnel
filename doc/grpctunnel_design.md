@@ -8,32 +8,36 @@ James Protzman, Carl Lebsack, Rob Shakir
 
 <!-- MarkdownTOC -->
 
-- [Objective](#objective)
-- [Background](#background)
-- [Overview](#overview)
-- [Detailed Design](#detailed-design)
-  - [Tunnel Proto Design](#tunnel-proto-design)
-  - [Data Message Fields](#data-message-fields)
-    - [Tag Field](#tag-field)
-    - [Data Field](#data-field)
-    - [Close Field](#close-field)
-  - [Session Message Fields](#session-message-fields)
-    - [Tag Field](#tag-field-1)
-    - [Accept Field](#accept-field)
-    - [Target ID Field](#target-id-field)
-    - [Target Type Field](#target-type-field)
-    - [Error Field](#error-field)
-  - [Target Message Fields](#target-message-fields)
-    - [Op Field](#op-field-1)
-    - [Accept/Target ID/Target Type/Error Fields](#tag-field-2)
-  - [Subscription Message Fields](#subscription-message-fields)
-    - [Op Field](#op-field-2)
-    - [Accept Field](#accept-field-2)
-    - [Target Type Field](#target-type-field-2)
-    - [Error Field](#error-field)-2
-  - [Handlers](#handlers)
-  - [Client](#client)
-  - [Server](#server)
+- [TCP over gRPC Tunnel](#tcp-over-grpc-tunnel)
+  - [Objective](#objective)
+  - [Background](#background)
+  - [Overview](#overview)
+  - [Detailed Design](#detailed-design)
+    - [Tunnel Proto Design](#tunnel-proto-design)
+    - [Data Message Fields](#data-message-fields)
+      - [Tag Field](#tag-field)
+      - [Data Field](#data-field)
+      - [Close Field](#close-field)
+    - [Session Message Fields](#session-message-fields)
+      - [Tag Field](#tag-field-1)
+      - [Accept Field](#accept-field)
+      - [Target ID Field](#target-id-field)
+      - [Target Type Field](#target-type-field)
+      - [Error Field](#error-field)
+    - [Target Message Fields](#target-message-fields)
+      - [Op Field](#op-field)
+      - [Accept / Target ID/ Target Type / Error Fields](#accept--target-id-target-type--error-fields)
+    - [Subscription Message Fields](#subscription-message-fields)
+      - [Op Field](#op-field-1)
+      - [Accept Fields](#accept-fields)
+      - [Target Type Fields](#target-type-fields)
+      - [Error Fields](#error-fields)
+    - [Handlers](#handlers)
+    - [Client](#client)
+    - [Server](#server)
+    - [Target Registration](#target-registration)
+    - [Subscription](#subscription)
+    - [Bridge Mode](#bridge-mode)
 
 <!-- /MarkdownTOC -->
 
@@ -292,7 +296,7 @@ what is done with a stream on the opposing side of a new session request.
 A new client will be created and started using the `NewClient`. When the client
 is started, it will attempt to connect to the tunnel server over the register
 client will wait until they receive a request for a new session. The server
-gRPC service. If it is successful, the client [registers](#resiter) its target 
+gRPC service. If it is successful, the client [registers](#target-registration) its target 
 id and target type. If configured, the client will also 
 [subscribe](#subscription) targets from the server. At this point, the server 
 and section](#server) below will cover new session requests from the server 
