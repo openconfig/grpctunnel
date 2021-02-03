@@ -37,7 +37,6 @@ import (
 // Config defines the parameters to run a tunnel client.
 type Config struct {
 	TunnelAddress, DialAddress, ListenAddress, CertFile, Target, TargetType string
-	Bridge                                                                  bool
 }
 
 func listen(ctx context.Context, c *tunnel.Client, listenAddress string, target tunnel.Target) error {
@@ -162,20 +161,18 @@ func Run(ctx context.Context, conf Config) error {
 		}
 	}()
 
-	// If running bridge mode, pick peer targets sequentially.
-	if conf.Bridge {
-		cancels := make(map[tunnel.Target]func())
-		select {
-		case target := <-peerAddCh:
-			ctx, cancels[target] = context.WithCancel(ctx)
-			if err := listen(ctx, client, conf.ListenAddress, target); err != nil {
-				errCh <- err
-				cancels[target]()
-			}
-		case target := <-peerDelCh:
+	// listen for any request to create a new session
+	cancels := make(map[tunnel.Target]func())
+	select {
+	case target := <-peerAddCh:
+		ctx, cancels[target] = context.WithCancel(ctx)
+		if err := listen(ctx, client, conf.ListenAddress, target); err != nil {
+			errCh <- err
 			cancels[target]()
-			delete(cancels, target)
 		}
+	case target := <-peerDelCh:
+		cancels[target]()
+		delete(cancels, target)
 	}
 
 	select {
