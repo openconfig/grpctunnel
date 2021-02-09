@@ -1,3 +1,3 @@
 # Failed New Session On Client
 
-![Failed Session Client-Side Flow](images/failed-on-client.png)
+![Failed Session Client-Side Flow](images/failednewsessiononclient.png)
