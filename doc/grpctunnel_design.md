@@ -35,10 +35,6 @@ James Protzman, Carl Lebsack, Rob Shakir
     - [Handlers](#handlers)
     - [Client](#client)
     - [Server](#server)
-<<<<<<< HEAD
-- [<<<<<<< HEAD](#-head)
-=======
->>>>>>> f586672 (update doc)
     - [Target Registration](#target-registration)
     - [Subscription](#subscription)
     - [Bridge Mode](#bridge-mode)
@@ -332,13 +328,6 @@ When `NewSession` is called on the server, it will send a register request, with
 an ack to the tunnel client. The client will then check if it can handle the
 request, and if it can, it will create a new tunnel session to the server. The
 tunnel session is then forwarded to the client handler function on the client,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 33004f0 (update doc)
-=======
->>>>>>> f586672 (update doc)
 and returned to the `NewSession` request on the server.
 
 ### Target Registration
@@ -378,8 +367,4 @@ as in [Client](#client)). Next, the bridge reigster handler and tunnel handler
 will be called, where it will call `NewSession` to create  a new session to the 
 `remote` client, and start a continuous bi-direcitonal copy between the newly
 created session (with the `remote` client) and the session with the original 
-<<<<<<< HEAD
 client.
-=======
-client.
->>>>>>> f586672 (update doc)
