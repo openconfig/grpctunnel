@@ -4,7 +4,7 @@
 James Protzman, Carl Lebsack, Rob Shakir
 
 **February, 2019**
-*Updated*: April 2020
+*Updated*: February 2021
 
 <!-- MarkdownTOC -->
 
@@ -21,14 +21,24 @@ James Protzman, Carl Lebsack, Rob Shakir
     - [Session Message Fields](#session-message-fields)
       - [Tag Field](#tag-field-1)
       - [Accept Field](#accept-field)
-      - [Capabilities Field](#capabilities-field)
       - [Target ID Field](#target-id-field)
+      - [Target Type Field](#target-type-field)
       - [Error Field](#error-field)
-    - [Capabilities Message Fields](#capabilities-message-fields)
-      - [Handler Field](#handler-field)
+    - [Target Message Fields](#target-message-fields)
+      - [Op Field](#op-field)
+      - [Accept / Target ID/ Target Type / Error Fields](#accept--target-id-target-type--error-fields)
+    - [Subscription Message Fields](#subscription-message-fields)
+      - [Op Field](#op-field-1)
+      - [Accept Fields](#accept-fields)
+      - [Target Type Fields](#target-type-fields)
+      - [Error Fields](#error-fields)
     - [Handlers](#handlers)
     - [Client](#client)
     - [Server](#server)
+- [<<<<<<< HEAD](#-head)
+    - [Target Registration](#target-registration)
+    - [Subscription](#subscription)
+    - [Bridge Mode](#bridge-mode)
 
 <!-- /MarkdownTOC -->
 
@@ -122,17 +132,54 @@ message Data {
   bool close = 3;
 }
 
-message Session {
-  int32 tag = 1;
+message RegisterOp {
+  oneof Registration {
+    Target target = 1;
+    Session session = 2;
+    Subscription subscription = 3;
+  }
+}
+
+enum TargetType {
+  UNKNOWN = 0;
+  SSH = 22;
+  GNMI_GNOI = 9339;
+}
+
+message Target {
+  enum TargetOp {
+    UNKNOWN = 0;
+    ADD = 1;
+    REMOVE = 2;
+  }
+  TargetOp op = 1;
   bool accept = 2;
-  Capabilities capabilities = 3;
-  string target_id = 4;
+  string target_id = 3;
+  string target_type = 4;
   string error = 5;
 }
 
-message Capabilities {
-  bool handler = 1;
+message Session {
+  int32 tag = 1;
+  bool accept = 2;
+  string target_id = 3;
+  string target_type = 4;
+  string error = 5;
 }
+
+
+message Subscription {
+  enum SubscriptionOp {
+    UNKNOWN = 0;
+    SUBCRIBE = 1;
+    UNSUBCRIBE = 2;
+  }
+  SubscriptionOp op = 1;
+  bool accept = 2;
+  string target_type = 3;
+  string error = 4;
+}
+
 ```
 
 
@@ -142,7 +189,7 @@ The tunnel proto defines a gRPC service, `Tunnel`, which defines two rpc
 methods:
 
 1. a `register` method which allows the tunnel server to request new tunnel
-streams from the client using[ session messages](#session-message-fields), and
+streams from the client using [session messages](#session-message-fields), and
 2. a `tunnel` method, which is used to create new tunnel streams. These streams
 forward the data from TCP streams over a bi-directional gRPC stream of [data
 messages](#data-message-fields).
@@ -186,33 +233,56 @@ The `accept` field is sent by the tunnel server to indicate that it added an
 associated connection in its map. This allows a new tunnel session from the
 client to be handled correctly.
 
-#### Capabilities Field
-
-`Capabilities` is a separate message to allow future extensions. It is defined
-in more detail in the [next section](#capabilities-message-fields)
-
 #### Target ID Field
 
 The `target_id` field is used by the register handler on either the tunnel
 server or client to define what the handler function can handle. This is
 explained in more detail in the [handlers](#handler-field) sections below.
 
+#### Target Type Field
+
+The `target_type` represents the type of targets. It is use together with 
+target_id in most cases.
+
 #### Error Field
 
 The `error` field is used by the client and server to exchange errors
 encountered when requesting new sessions.
 
-### Capabilities Message Fields
+### Target Message Fields
 
-Capabilities are exchanged between endpoints at start up to allow them to make
-decisions based on their neighbors’ settings.
+#### Op Field
 
-#### Handler Field
+The `op` field is used to represent different registration operations 
+(ADD/REMOVE/UNKNOWN).
 
-The `handler` field is true when the client defined register handler and handler
-functions are present on the endpoint. If no handlers are defined (either
-remotely, or locally), then the server will not run. Having handlers defined on
-one side, will allow the server to run.
+#### Accept / Target ID/ Target Type / Error Fields
+
+These fields carry the same meaning as the corresponding fields in the Session 
+message.
+
+### Subscription Message Fields
+
+#### Op Field
+
+The `op` field is used to represent different subscription operations
+(subscribe/unsubscribe/unknown).
+
+#### Accept Fields
+
+The `accept` field is sent by the tunnel server to indicate that the 
+subscription is successful.
+
+#### Target Type Fields
+
+The `type_type` field is used to indicate the eligible targets. If it is empty, 
+the server will assume that the client wants to subscribe everything.
+
+#### Error Fields
+
+The `error` field is used by the server to send back errors if the subscription 
+is unsuccessful.
+
 
 ### Handlers
 
@@ -226,10 +296,11 @@ what is done with a stream on the opposing side of a new session request.
 
 A new client will be created and started using the `NewClient`. When the client
 is started, it will attempt to connect to the tunnel server over the register
-gRPC service. If it is successful, the client and server exchange
-[capabilities](#capabilities-message-fields). At this point, the server and
-client will wait until they receive a request for a new session. The [server
-section](#server) below will cover new session requests from the server
+client will wait until they receive a request for a new session. The server
+gRPC service. If it is successful, the client [registers](#target-registration) its target 
+id and target type. If configured, the client will also 
+[subscribe](#subscription) targets from the server. At this point, the server 
+and section](#server) below will cover new session requests from the server 
 perspective.
 
 When `NewSession` is called on the client, it will send a register request to
@@ -259,6 +330,9 @@ an ack to the tunnel client. The client will then check if it can handle the
 request, and if it can, it will create a new tunnel session to the server. The
 tunnel session is then forwarded to the client handler function on the client,
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 33004f0 (update doc)
 and returned to the `NewSession` request on the server.
 
 ### Target Registration
@@ -299,6 +373,3 @@ will be called, where it will call `NewSession` to create  a new session to the
 `remote` client, and start a continuous bi-direcitonal copy between the newly
 created session (with the `remote` client) and the session with the original 
 client.
-=======
-and returned to the `NewSession` request on the server.
->>>>>>> 9786039 (revert change to md for now)
