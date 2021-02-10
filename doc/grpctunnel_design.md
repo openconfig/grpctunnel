@@ -334,8 +334,7 @@ and returned to the `NewSession` request on the server.
 
 During registration, a client will send a `Target` message to register its
 target (ID and type). The server will check if the target is already registered.
-It will return an error message if already existed, or return an accepted ack 
-message otherwise. A target addition handler will be called.
+It will return an error message not accepted (e.g. target already exists) or return an accepted acknowledgement message otherwise. A target addition handler will be called.
 
 Once the tunnel is up running, subsequent addition and deletion of targets are 
 also supported.
