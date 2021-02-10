@@ -29,6 +29,9 @@ James Protzman, Carl Lebsack, Rob Shakir
     - [Handlers](#handlers)
     - [Client](#client)
     - [Server](#server)
+    - [Target Registration](#target-registration)
+    - [Subscription](#subscription)
+    - [Bridge Mode](#bridge-mode)
 
 <!-- /MarkdownTOC -->
 
@@ -259,3 +262,40 @@ an ack to the tunnel client. The client will then check if it can handle the
 request, and if it can, it will create a new tunnel session to the server. The
 tunnel session is then forwarded to the client handler function on the client,
 and returned to the `NewSession` request on the server.
+
+### Target Registration
+
+During registration, a client will send a `Target` message to register its
+target (ID and type). The server will check if the target is already registered.
+It will return an error message not accepted (e.g. target already exists) or return an accepted acknowledgement message otherwise. A target addition handler will be called.
+
+Once the tunnel is up running, subsequent addition and deletion of targets are 
+also supported.
+
+### Subscription
+
+During registration, a client sends an `subscription` message to subscribe
+targets from the server. The subscription can be either by target type 
+or everything if the `target_type` field is empty. Once the server receives the
+subscription, it will send a list of filtered targets back to client as
+`Target` message. After sending the whole list, it sends a accepted message.
+The server will also send updates to all corresponding subscribers when a 
+target is added or deleted.
+
+Once the tunnel is up running, subsequent subscription and unsubscription are 
+also supported.
+
+### Bridge Mode
+
+The bridge mode is a special session initiated from a client, where the
+requested target is `remote` to server. It is initiated in the same way as
+non-bridge session via `NewSession` while the target ID and type corresponds to
+a `remote` target for the server.
+
+Upon receiving such request, server will check if the request corresponds to a
+`remote` target (otherwise, it will be treated as a normal new session request
+as in [Client](#client)). Next, the bridge reigster handler and tunnel handler
+will be called, where it will call `NewSession` to create  a new session to the 
+`remote` client, and start a continuous bi-direcitonal copy between the newly
+created session (with the `remote` client) and the session with the original 
+client.
