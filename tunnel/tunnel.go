@@ -1102,10 +1102,9 @@ type ClientConfig struct {
 type Client struct {
 	endpoint
 
-	block      chan struct{}
-	Registered bool
-	tc         tpb.TunnelClient
-	cc         ClientConfig
+	block chan struct{}
+	tc    tpb.TunnelClient
+	cc    ClientConfig
 
 	cmu  sync.RWMutex
 	rs   *regSafeStream
@@ -1138,7 +1137,6 @@ func NewClient(tc tpb.TunnelClient, cc ClientConfig, ts map[Target]struct{}) (*C
 			increment: -1,
 		},
 		targets:         ts,
-		Registered:      false,
 		peerTypeTargets: peerTypeTargets,
 	}, nil
 }
@@ -1175,124 +1173,127 @@ func (c *Client) NewSession(target Target) (_ io.ReadWriteCloser, err error) {
 	return ioe.rwc, nil
 }
 
+// Register initializes the client register stream and determines the
+// capabilities of the tunnel server.
+func (c *Client) Register(ctx context.Context) (err error) {
+
+	c.cmu.Lock()
+	defer c.cmu.Unlock()
+	stream, err := c.tc.Register(ctx, c.cc.Opts...)
+	if err != nil {
+		return fmt.Errorf("start: failed to create register stream: %v", err)
+	}
+	c.rs = &regSafeStream{regStream: stream}
+	p, ok := peer.FromContext(stream.Context())
+	if !ok {
+		return errors.New("no peer from stream context")
+	}
+	c.addr = p.Addr
+
+	for target := range c.targets {
+		c.NewTarget(target)
+	}
+
+	for typ := range c.peerTypeTargets {
+		c.Subscribe(typ)
+	}
+
+	return nil
+}
+
 // Run initializes the client register stream and determines the capabilities
 // of the tunnel server. Once done, it starts the stream handler responsible
 // for determining what to do with received requests.
 func (c *Client) Run(ctx context.Context) error {
+	if err := c.Register(ctx); err != nil {
+		return err
+	}
+	return c.Start(ctx)
+}
+
+// Start handles received register stream requests.
+func (c *Client) Start(ctx context.Context) error {
+
 	select {
 	case c.block <- struct{}{}:
 		defer func() {
 			<-c.block
 		}()
-		// wrap critical section in a function to allow use of defer
-		setup := func() error {
-			c.cmu.Lock()
-			defer c.cmu.Unlock()
-			stream, err := c.tc.Register(ctx, c.cc.Opts...)
-			if err != nil {
-				return fmt.Errorf("start: failed to create register stream: %v", err)
-			}
-			c.rs = &regSafeStream{regStream: stream}
-			p, ok := peer.FromContext(stream.Context())
-			if !ok {
-				return errors.New("no peer from stream context")
-			}
-			c.addr = p.Addr
+		errCh := make(chan error, 1)
 
-			for target := range c.targets {
-				c.NewTarget(target)
-			}
-
-			for typ := range c.peerTypeTargets {
-				c.Subscribe(typ)
-			}
-
-			return nil
-		}
-
-		if err := setup(); err != nil {
-			return err
-		}
-		c.Registered = true
-		return c.start(ctx)
-	default:
-		return errors.New("client is already running")
-	}
-}
-
-// start handles received register stream requests.
-func (c *Client) start(ctx context.Context) error {
-	errCh := make(chan error, 1)
-
-	go func() {
-		for {
-			reg, err := c.rs.Recv()
-			if err != nil {
-				select {
-				case errCh <- err:
-				default:
-				}
-				return
-			}
-
-			switch reg.Registration.(type) {
-			case *tpb.RegisterOp_Session:
-				session := reg.GetSession()
-				if !session.GetAccept() {
+		go func() {
+			for {
+				reg, err := c.rs.Recv()
+				if err != nil {
 					select {
-					case errCh <- fmt.Errorf("connection %d not accepted by server", session.GetTag()):
+					case errCh <- err:
 					default:
 					}
 					return
 				}
-				tag := session.Tag
-				tID := session.GetTargetId()
-				tType := session.GetTargetType()
-				go func() {
-					if err := c.streamHandler(ctx, tag, Target{ID: tID, Type: tType}); err != nil {
+
+				switch reg.Registration.(type) {
+				case *tpb.RegisterOp_Session:
+					session := reg.GetSession()
+					if !session.GetAccept() {
 						select {
-						case errCh <- err:
-						default:
-						}
-					}
-				}()
-			case *tpb.RegisterOp_Target:
-				target := reg.GetTarget()
-				switch op := target.GetOp(); op {
-				case tpb.Target_ADD:
-					if err := c.addPeerTarget(target); err != nil {
-						errCh <- fmt.Errorf("failed to add peer target: %v", err)
-					}
-				case tpb.Target_REMOVE:
-					if err := c.deletePeerTarget(target); err != nil {
-						errCh <- fmt.Errorf("failed to delete peer target: %v", err)
-					}
-				default:
-					// The rest are acks.
-					if !target.GetAccept() {
-						select {
-						case errCh <- fmt.Errorf("target registration (%s, %s) not accepted by server", target.TargetId, target.TargetType):
+						case errCh <- fmt.Errorf("connection %d not accepted by server", session.GetTag()):
 						default:
 						}
 						return
 					}
-				}
-			case *tpb.RegisterOp_Subscription:
-				sub := reg.GetSubscription()
-				op := sub.GetOp()
-				if op == tpb.Subscription_SUBCRIBE || op == tpb.Subscription_UNSUBCRIBE {
-					if !sub.GetAccept() {
-						select {
-						case errCh <- fmt.Errorf("subscription request (%s) not accepted by server", sub.TargetType):
-						default:
+					tag := session.Tag
+					tID := session.GetTargetId()
+					tType := session.GetTargetType()
+					go func() {
+						if err := c.streamHandler(ctx, tag, Target{ID: tID, Type: tType}); err != nil {
+							select {
+							case errCh <- err:
+							default:
+							}
 						}
-						return
+					}()
+				case *tpb.RegisterOp_Target:
+					target := reg.GetTarget()
+					switch op := target.GetOp(); op {
+					case tpb.Target_ADD:
+						if err := c.addPeerTarget(target); err != nil {
+							errCh <- fmt.Errorf("failed to add peer target: %v", err)
+						}
+					case tpb.Target_REMOVE:
+						if err := c.deletePeerTarget(target); err != nil {
+							errCh <- fmt.Errorf("failed to delete peer target: %v", err)
+						}
+					default:
+						// The rest are acks.
+						if !target.GetAccept() {
+							select {
+							case errCh <- fmt.Errorf("target registration (%s, %s) not accepted by server", target.TargetId, target.TargetType):
+							default:
+							}
+							return
+						}
+					}
+				case *tpb.RegisterOp_Subscription:
+					sub := reg.GetSubscription()
+					op := sub.GetOp()
+					if op == tpb.Subscription_SUBCRIBE || op == tpb.Subscription_UNSUBCRIBE {
+						if !sub.GetAccept() {
+							select {
+							case errCh <- fmt.Errorf("subscription request (%s) not accepted by server", sub.TargetType):
+							default:
+							}
+							return
+						}
 					}
 				}
 			}
-		}
-	}()
-	return <-errCh
+		}()
+
+		return <-errCh
+	default:
+		return errors.New("client is already running")
+	}
 }
 
 func (c *Client) streamHandler(ctx context.Context, tag int32, t Target) (e error) {

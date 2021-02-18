@@ -852,10 +852,13 @@ func TestClientRunBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create new client: %v", err)
 	}
+	if err := c.Register(ctx); err != nil {
+		t.Fatalf("c.Register() failed: %v", err)
+	}
 
 	chanErr := make(chan error, 2)
 	clientRun := func() {
-		if err := c.Run(ctx); err != nil {
+		if err := c.Start(ctx); err != nil {
 			chanErr <- err
 		}
 	}
@@ -881,6 +884,9 @@ func TestClientRunBlocked(t *testing.T) {
 		time.Second*5,
 	)
 	defer cancel()
+	if err := c.Register(ctx); err != nil {
+		t.Fatalf("c.Register() failed: %v", err)
+	}
 	go clientRun()
 	select {
 	case <-ctx.Done():
@@ -955,7 +961,15 @@ func TestClientRun(t *testing.T) {
 			} else {
 				test.c.tc = test.tc
 			}
-			err = test.c.Run(test.ctx)
+			err = test.c.Register(test.ctx)
+			if err != nil {
+				if !test.wantErr {
+					t.Fatalf("c.Register() got %v, want success", err)
+				}
+				return
+			}
+
+			err = test.c.Start(test.ctx)
 			if err == nil && test.wantErr {
 				t.Fatal("c.Run() got success, want error")
 			}
@@ -1030,12 +1044,12 @@ func TestClientStart(t *testing.T) {
 			c.addr = addr
 			retCh := make(chan ioOrErr, 1)
 			err = c.addConnection(-1, addr, retCh)
-			err = c.start(context.Background())
+			err = c.Start(context.Background())
 			if err == nil && test.wantErr {
-				t.Fatal("c.start() got success, want error")
+				t.Fatal("c.Start() got success, want error")
 			}
 			if err != nil && !test.wantErr {
-				t.Fatalf("c.start() got %v, want success", err)
+				t.Fatalf("c.Start() got %v, want success", err)
 			}
 		})
 	}
