@@ -120,7 +120,7 @@ func registerTunnelClient(ctx context.Context, addr string, cert string, l *List
 
 // Listener wraps a tunnel connection.
 type Listener struct {
-	conn  io.ReadWriteCloser
+	conn  []io.ReadWriteCloser
 	addr  tunnelAddr
 	chIO  chan io.ReadWriteCloser
 	chErr chan error
@@ -132,10 +132,9 @@ func (l *Listener) Accept() (net.Conn, error) {
 	select {
 	case err := <-l.chErr:
 		return nil, fmt.Errorf("failed to get tunnel listener: %v", err)
-	case l.conn = <-l.chIO:
+	case conn := <-l.chIO:
+		l.conn = append(l.conn, conn)
 		log.Printf("tunnel listen setup")
-		conn := l.conn
-		l.conn = nil
 		return &Conn{conn}, nil
 	}
 }
@@ -150,8 +149,10 @@ func (l *Listener) Close() error {
 	}
 
 	if l.conn != nil {
-		if e := l.conn.Close(); e != nil {
-			errs = append(errs, fmt.Sprintf("failed to close listener.conn: %v", e))
+		for _, conn := range l.conn {
+			if e := conn.Close(); e != nil {
+				errs = append(errs, fmt.Sprintf("failed to close listener.conn: %v", e))
+			}
 		}
 	}
 	if len(errs) > 0 {
@@ -204,7 +205,7 @@ func Listen(ctx context.Context, addr string, cert string, targets map[Target]st
 		default:
 		}
 		duration := bo.NextBackOff()
-		time.Sleep(duration)
 		log.Printf("Tunnel listener will retry in %s.", duration)
+		time.Sleep(duration)
 	}
 }
