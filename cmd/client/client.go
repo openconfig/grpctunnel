@@ -162,6 +162,9 @@ func Run(ctx context.Context, conf Config) error {
 		if err := client.Start(ctx); err != nil {
 			errCh <- err
 		}
+		if err := client.Error(); err != nil {
+			errCh <- err
+		}
 	}()
 
 	// listen for any request to create a new session

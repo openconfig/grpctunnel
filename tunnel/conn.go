@@ -193,6 +193,9 @@ func Listen(ctx context.Context, addr string, cert string, targets map[Target]st
 					l.chErr <- err
 					return
 				}
+				if c.err != nil {
+					l.chErr <- c.Error()
+				}
 			}()
 			return l, nil
 		}

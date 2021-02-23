@@ -1114,6 +1114,27 @@ type Client struct {
 
 	pmu             sync.RWMutex
 	peerTypeTargets map[string]map[Target]struct{}
+
+	err        error
+	emu        sync.RWMutex
+	cancelFunc func()
+}
+
+func (c *Client) cancel(err error) {
+	c.emu.Lock()
+	defer c.emu.Unlock()
+	c.cancelFunc()
+	if c.err != nil {
+		c.err = err
+	}
+}
+
+// Error returns the error collected from streamHandler.
+func (c *Client) Error() error {
+	c.emu.RLock()
+	defer c.emu.RUnlock()
+
+	return c.err
 }
 
 // NewClient creates a new tunnel client.
@@ -1176,9 +1197,10 @@ func (c *Client) NewSession(target Target) (_ io.ReadWriteCloser, err error) {
 // Register initializes the client register stream and determines the
 // capabilities of the tunnel server.
 func (c *Client) Register(ctx context.Context) (err error) {
-
 	c.cmu.Lock()
 	defer c.cmu.Unlock()
+
+	ctx, c.cancelFunc = context.WithCancel(ctx)
 	stream, err := c.tc.Register(ctx, c.cc.Opts...)
 	if err != nil {
 		return fmt.Errorf("start: failed to create register stream: %v", err)
@@ -1222,9 +1244,6 @@ func (c *Client) Start(ctx context.Context) error {
 		return errors.New("client is already running")
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	errCh := make(chan error, 1)
 	for {
 		reg, err := c.rs.Recv()
 		if err != nil {
@@ -1242,10 +1261,7 @@ func (c *Client) Start(ctx context.Context) error {
 			tType := session.GetTargetType()
 			go func() {
 				if err := c.streamHandler(ctx, tag, Target{ID: tID, Type: tType}); err != nil {
-					select {
-					case errCh <- err:
-					default:
-					}
+					c.cancel(err)
 				}
 			}()
 		case *tpb.RegisterOp_Target:
@@ -1274,7 +1290,6 @@ func (c *Client) Start(ctx context.Context) error {
 			}
 		}
 	}
-	return <-errCh
 }
 
 func (c *Client) streamHandler(ctx context.Context, tag int32, t Target) (e error) {
