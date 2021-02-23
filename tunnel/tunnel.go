@@ -1120,13 +1120,18 @@ type Client struct {
 	cancelFunc func()
 }
 
-func (c *Client) cancel(err error) {
+// Cancel cancels goroutine from Start() and streamHandler(), and records error.
+func (c *Client) Cancel(err error) {
+	// Avoid calling multiple times.
+	if c.cancelFunc == nil {
+		return
+	}
+
 	c.emu.Lock()
 	defer c.emu.Unlock()
 	c.cancelFunc()
-	if c.err != nil {
-		c.err = err
-	}
+	c.cancelFunc = nil
+	c.err = err
 }
 
 // Error returns the error collected from streamHandler.
@@ -1230,7 +1235,8 @@ func (c *Client) Run(ctx context.Context) error {
 	if err := c.Register(ctx); err != nil {
 		return err
 	}
-	return c.Start(ctx)
+	c.Start(ctx)
+	return c.Error()
 }
 
 // Start handles received register stream requests.
@@ -1261,7 +1267,7 @@ func (c *Client) Start(ctx context.Context) error {
 			tType := session.GetTargetType()
 			go func() {
 				if err := c.streamHandler(ctx, tag, Target{ID: tID, Type: tType}); err != nil {
-					c.cancel(err)
+					c.Cancel(err)
 				}
 			}()
 		case *tpb.RegisterOp_Target:

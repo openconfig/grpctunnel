@@ -60,8 +60,8 @@ func ServerConn(ctx context.Context, ts *Server, addr string, target *Target) (*
 			return &Conn{session}, nil
 		}
 		duration := bo.NextBackOff()
-		time.Sleep(duration)
 		log.Printf("Failed to get tunnel connection: %v.\nRetrying in %s.", err, duration)
+		time.Sleep(duration)
 
 		select {
 		case <-ctx.Done():
@@ -189,12 +189,9 @@ func Listen(ctx context.Context, addr string, cert string, targets map[Target]st
 	for {
 		if c, err := registerTunnelClient(ctx, addr, cert, l, targets); err == nil {
 			go func() {
-				if err := c.Start(ctx); err != nil {
+				c.Cancel(c.Start(ctx))
+				if err := c.Error(); err != nil {
 					l.chErr <- err
-					return
-				}
-				if c.err != nil {
-					l.chErr <- c.Error()
 				}
 			}()
 			return l, nil
