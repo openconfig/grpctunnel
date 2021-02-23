@@ -1120,15 +1120,15 @@ type Client struct {
 	cancelFunc func()
 }
 
-// Cancel cancels goroutine from Start() and streamHandler(), and records error.
-func (c *Client) Cancel(err error) {
+// cancel performs cancellations of Start() and streamHandler(), and records error.
+func (c *Client) cancel(err error) {
+	c.emu.Lock()
+	defer c.emu.Unlock()
 	// Avoid calling multiple times.
 	if c.cancelFunc == nil {
 		return
 	}
 
-	c.emu.Lock()
-	defer c.emu.Unlock()
 	c.cancelFunc()
 	c.cancelFunc = nil
 	c.err = err
@@ -1240,50 +1240,61 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 // Start handles received register stream requests.
-func (c *Client) Start(ctx context.Context) error {
+func (c *Client) Start(ctx context.Context) {
+	var err error
+	defer func() {
+		c.cancel(err)
+	}()
+
 	select {
 	case c.block <- struct{}{}:
 		defer func() {
 			<-c.block
 		}()
 	default:
-		return errors.New("client is already running")
+		err = errors.New("client is already running")
+		return
 	}
 
 	for {
-		reg, err := c.rs.Recv()
+		var reg *tpb.RegisterOp
+		reg, err = c.rs.Recv()
 		if err != nil {
-			return err
+			return
 		}
 
 		switch reg.Registration.(type) {
 		case *tpb.RegisterOp_Session:
 			session := reg.GetSession()
 			if !session.GetAccept() {
-				return fmt.Errorf("connection %d not accepted by server", session.GetTag())
+				err = fmt.Errorf("connection %d not accepted by server", session.GetTag())
+				return
 			}
 			tag := session.Tag
 			tID := session.GetTargetId()
 			tType := session.GetTargetType()
 			go func() {
 				if err := c.streamHandler(ctx, tag, Target{ID: tID, Type: tType}); err != nil {
-					c.Cancel(err)
+					c.cancel(err)
 				}
 			}()
 		case *tpb.RegisterOp_Target:
 			target := reg.GetTarget()
 			switch op := target.GetOp(); op {
 			case tpb.Target_ADD:
-				if err := c.addPeerTarget(target); err != nil {
-					return fmt.Errorf("failed to add peer target: %v", err)
+				if e := c.addPeerTarget(target); e != nil {
+					err = fmt.Errorf("failed to add peer target: %v", e)
+					return
 				}
 			case tpb.Target_REMOVE:
-				if err := c.deletePeerTarget(target); err != nil {
-					return fmt.Errorf("failed to delete peer target: %v", err)
+				if e := c.deletePeerTarget(target); e != nil {
+					err = fmt.Errorf("failed to delete peer target: %v", e)
+					return
 				}
 			default:
 				if !target.GetAccept() {
-					return fmt.Errorf("target registration (%s, %s) not accepted by server", target.TargetId, target.TargetType)
+					err = fmt.Errorf("target registration (%s, %s) not accepted by server", target.TargetId, target.TargetType)
+					return
 				}
 			}
 		case *tpb.RegisterOp_Subscription:
@@ -1291,7 +1302,8 @@ func (c *Client) Start(ctx context.Context) error {
 			op := sub.GetOp()
 			if op == tpb.Subscription_SUBCRIBE || op == tpb.Subscription_UNSUBCRIBE {
 				if !sub.GetAccept() {
-					return fmt.Errorf("subscription request (%s) not accepted by server", sub.TargetType)
+					err = fmt.Errorf("subscription request (%s) not accepted by server", sub.TargetType)
+					return
 				}
 			}
 		}

@@ -159,7 +159,7 @@ func Run(ctx context.Context, conf Config) error {
 			errCh <- err
 			return
 		}
-		client.Cancel(client.Start(ctx))
+		client.Start(ctx)
 		if err := client.Error(); err != nil {
 			errCh <- err
 		}

@@ -189,7 +189,7 @@ func Listen(ctx context.Context, addr string, cert string, targets map[Target]st
 	for {
 		if c, err := registerTunnelClient(ctx, addr, cert, l, targets); err == nil {
 			go func() {
-				c.Cancel(c.Start(ctx))
+				c.Start(ctx)
 				if err := c.Error(); err != nil {
 					l.chErr <- err
 				}

@@ -858,7 +858,8 @@ func TestClientRunBlocked(t *testing.T) {
 
 	chanErr := make(chan error, 2)
 	clientRun := func() {
-		if err := c.Start(ctx); err != nil {
+		c.Start(ctx)
+		if err := c.Error(); err != nil {
 			chanErr <- err
 		}
 	}
@@ -969,7 +970,8 @@ func TestClientRun(t *testing.T) {
 				return
 			}
 
-			err = test.c.Start(test.ctx)
+			test.c.Start(test.ctx)
+			err = test.c.Error()
 			if err == nil && test.wantErr {
 				t.Fatal("c.Run() got success, want error")
 			}
@@ -1044,7 +1046,11 @@ func TestClientStart(t *testing.T) {
 			c.addr = addr
 			retCh := make(chan ioOrErr, 1)
 			err = c.addConnection(-1, addr, retCh)
-			err = c.Start(context.Background())
+
+			ctx := context.Background()
+			ctx, c.cancelFunc = context.WithCancel(ctx)
+			c.Start(ctx)
+			err = c.Error()
 			if err == nil && test.wantErr {
 				t.Fatal("c.Start() got success, want error")
 			}
