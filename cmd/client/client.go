@@ -155,31 +155,23 @@ func Run(ctx context.Context, conf Config) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		err := client.Run(ctx)
-		if err != nil {
+		if err := client.Register(ctx); err != nil {
+			errCh <- err
+			return
+		}
+		client.Start(ctx)
+		if err := client.Error(); err != nil {
 			errCh <- err
 		}
 	}()
 
 	// listen for any request to create a new session
-	cancels := make(map[tunnel.Target]func())
 	select {
 	case target := <-peerAddCh:
-		ctx, cancels[target] = context.WithCancel(ctx)
-		if err := listen(ctx, client, conf.ListenAddress, target); err != nil {
-			errCh <- err
-			cancels[target]()
-		}
-	case target := <-peerDelCh:
-		cancels[target]()
-		delete(cancels, target)
-	}
-
-	select {
+		return listen(ctx, client, conf.ListenAddress, target)
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
 		return err
 	}
-
 }

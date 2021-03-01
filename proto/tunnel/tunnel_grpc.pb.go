@@ -97,7 +97,7 @@ func (x *tunnelTunnelClient) Recv() (*Data, error) {
 }
 
 // TunnelServer is the server API for Tunnel service.
-// All implementations should embed UnimplementedTunnelServer
+// All implementations must embed UnimplementedTunnelServer
 // for forward compatibility
 type TunnelServer interface {
 	// Register is used to register targets reachable via either the client
@@ -106,9 +106,10 @@ type TunnelServer interface {
 	// Tunnel allows the tunnel client and server to create a bidirectional stream
 	// in which data can be forwarded.
 	Tunnel(Tunnel_TunnelServer) error
+	mustEmbedUnimplementedTunnelServer()
 }
 
-// UnimplementedTunnelServer should be embedded to have forward compatible implementations.
+// UnimplementedTunnelServer must be embedded to have forward compatible implementations.
 type UnimplementedTunnelServer struct {
 }
 
@@ -118,6 +119,7 @@ func (UnimplementedTunnelServer) Register(Tunnel_RegisterServer) error {
 func (UnimplementedTunnelServer) Tunnel(Tunnel_TunnelServer) error {
 	return status.Errorf(codes.Unimplemented, "method Tunnel not implemented")
 }
+func (UnimplementedTunnelServer) mustEmbedUnimplementedTunnelServer() {}
 
 // UnsafeTunnelServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to TunnelServer will
@@ -203,5 +205,5 @@ var Tunnel_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "github.com/openconfig/grpctunnel/proto/tunnel/tunnel.proto",
+	Metadata: "proto/tunnel/tunnel.proto",
 }
