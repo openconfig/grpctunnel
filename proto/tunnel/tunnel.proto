@@ -14,6 +14,8 @@
 // limitations under the License.
 //
 
+// Version: 0.1
+
 syntax = "proto3";
 
 // Package grpctunnel defines a service specification for a TCP over gRPC proxy
@@ -50,8 +52,12 @@ enum TargetType {
   UNKNOWN = 0;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=22
   SSH = 22;
+  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=6653
+  OPENFLOW = 6653;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9339
   GNMI_GNOI = 9339;
+  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9559
+  P4_RUNTIME = 9559;
 }
 
 message Target {
