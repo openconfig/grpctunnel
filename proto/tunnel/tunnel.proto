@@ -54,10 +54,10 @@ enum TargetType {
   SSH = 22;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=6653
   OPENFLOW = 6653;
-  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9559
-  P4_RUNTIME = 9559;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9339
   GNMI_GNOI = 9339;
+  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9559
+  P4_RUNTIME = 9559;
 }
 
 message Target {
