@@ -29,6 +29,10 @@
 package grpctunnel
 
 import (
+	context "context"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -807,4 +811,195 @@ func file_proto_tunnel_tunnel_proto_init() {
 	file_proto_tunnel_tunnel_proto_rawDesc = nil
 	file_proto_tunnel_tunnel_proto_goTypes = nil
 	file_proto_tunnel_tunnel_proto_depIdxs = nil
+<<<<<<< HEAD
+=======
+}
+
+// Reference imports to suppress errors if they are not otherwise used.
+var _ context.Context
+var _ grpc.ClientConnInterface
+
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the grpc package it is being compiled against.
+const _ = grpc.SupportPackageIsVersion6
+
+// TunnelClient is the client API for Tunnel service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
+type TunnelClient interface {
+	// Register is used to register targets reachable via either the client
+	// or server and request new Tunnel RPC invocations.
+	Register(ctx context.Context, opts ...grpc.CallOption) (Tunnel_RegisterClient, error)
+	// Tunnel allows the tunnel client and server to create a bidirectional stream
+	// in which data can be forwarded.
+	Tunnel(ctx context.Context, opts ...grpc.CallOption) (Tunnel_TunnelClient, error)
+}
+
+type tunnelClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewTunnelClient(cc grpc.ClientConnInterface) TunnelClient {
+	return &tunnelClient{cc}
+}
+
+func (c *tunnelClient) Register(ctx context.Context, opts ...grpc.CallOption) (Tunnel_RegisterClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_Tunnel_serviceDesc.Streams[0], "/grpctunnel.Tunnel/Register", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &tunnelRegisterClient{stream}
+	return x, nil
+}
+
+type Tunnel_RegisterClient interface {
+	Send(*RegisterOp) error
+	Recv() (*RegisterOp, error)
+	grpc.ClientStream
+}
+
+type tunnelRegisterClient struct {
+	grpc.ClientStream
+}
+
+func (x *tunnelRegisterClient) Send(m *RegisterOp) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *tunnelRegisterClient) Recv() (*RegisterOp, error) {
+	m := new(RegisterOp)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *tunnelClient) Tunnel(ctx context.Context, opts ...grpc.CallOption) (Tunnel_TunnelClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_Tunnel_serviceDesc.Streams[1], "/grpctunnel.Tunnel/Tunnel", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &tunnelTunnelClient{stream}
+	return x, nil
+}
+
+type Tunnel_TunnelClient interface {
+	Send(*Data) error
+	Recv() (*Data, error)
+	grpc.ClientStream
+}
+
+type tunnelTunnelClient struct {
+	grpc.ClientStream
+}
+
+func (x *tunnelTunnelClient) Send(m *Data) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *tunnelTunnelClient) Recv() (*Data, error) {
+	m := new(Data)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// TunnelServer is the server API for Tunnel service.
+type TunnelServer interface {
+	// Register is used to register targets reachable via either the client
+	// or server and request new Tunnel RPC invocations.
+	Register(Tunnel_RegisterServer) error
+	// Tunnel allows the tunnel client and server to create a bidirectional stream
+	// in which data can be forwarded.
+	Tunnel(Tunnel_TunnelServer) error
+}
+
+// UnimplementedTunnelServer can be embedded to have forward compatible implementations.
+type UnimplementedTunnelServer struct {
+}
+
+func (*UnimplementedTunnelServer) Register(Tunnel_RegisterServer) error {
+	return status.Errorf(codes.Unimplemented, "method Register not implemented")
+}
+func (*UnimplementedTunnelServer) Tunnel(Tunnel_TunnelServer) error {
+	return status.Errorf(codes.Unimplemented, "method Tunnel not implemented")
+}
+
+func RegisterTunnelServer(s *grpc.Server, srv TunnelServer) {
+	s.RegisterService(&_Tunnel_serviceDesc, srv)
+}
+
+func _Tunnel_Register_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(TunnelServer).Register(&tunnelRegisterServer{stream})
+}
+
+type Tunnel_RegisterServer interface {
+	Send(*RegisterOp) error
+	Recv() (*RegisterOp, error)
+	grpc.ServerStream
+}
+
+type tunnelRegisterServer struct {
+	grpc.ServerStream
+}
+
+func (x *tunnelRegisterServer) Send(m *RegisterOp) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *tunnelRegisterServer) Recv() (*RegisterOp, error) {
+	m := new(RegisterOp)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _Tunnel_Tunnel_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(TunnelServer).Tunnel(&tunnelTunnelServer{stream})
+}
+
+type Tunnel_TunnelServer interface {
+	Send(*Data) error
+	Recv() (*Data, error)
+	grpc.ServerStream
+}
+
+type tunnelTunnelServer struct {
+	grpc.ServerStream
+}
+
+func (x *tunnelTunnelServer) Send(m *Data) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *tunnelTunnelServer) Recv() (*Data, error) {
+	m := new(Data)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+var _Tunnel_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "grpctunnel.Tunnel",
+	HandlerType: (*TunnelServer)(nil),
+	Methods:     []grpc.MethodDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Register",
+			Handler:       _Tunnel_Register_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Tunnel",
+			Handler:       _Tunnel_Tunnel_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
+	Metadata: "proto/tunnel/tunnel.proto",
+>>>>>>> 6f44b96f01143ca0c8c509312db75340ee44a0e5
 }
