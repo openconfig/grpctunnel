@@ -289,6 +289,8 @@ type Server struct {
 	sub map[net.Addr]map[string]struct{} // subscription information
 
 	errCh chan error // for logging server errors without disruptting the tunnel
+
+	tpb.UnimplementedTunnelServer
 }
 
 // NewServer creates a new tunnel server.
