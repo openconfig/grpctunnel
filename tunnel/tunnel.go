@@ -274,6 +274,7 @@ func (i clientRegInfo) IsZero() bool {
 
 // Server is the server implementation of an endpoint.
 type Server struct {
+	tpb.UnimplementedTunnelServer
 	endpoint
 
 	sc ServerConfig
