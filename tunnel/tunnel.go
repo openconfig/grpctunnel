@@ -570,7 +570,7 @@ func (s *Server) subscribe(addr net.Addr, sub *tpb.Subscription) error {
 	return nil
 }
 
-func (s *Server) deleteSubscriber(addr net.Addr, sub *tpb.Subscription) error {
+func (s *Server) deleteSubscriber(addr net.Addr, typ string) error {
 	s.smu.Lock()
 	defer s.smu.Unlock()
 
@@ -578,12 +578,12 @@ func (s *Server) deleteSubscriber(addr net.Addr, sub *tpb.Subscription) error {
 		return fmt.Errorf("client %s is not in subscription list", addr)
 	}
 
-	if sub.TargetType == "" {
+	if typ == "" {
 		delete(s.sub, addr)
 		return nil
 	}
 
-	delete(s.sub[addr], sub.TargetType)
+	delete(s.sub[addr], typ)
 	return nil
 }
 
@@ -594,7 +594,7 @@ func (s *Server) unsubscribe(addr net.Addr, sub *tpb.Subscription) error {
 	}
 	rs := clientInfo.rs
 
-	if err := s.deleteSubscriber(addr, sub); err != nil {
+	if err := s.deleteSubscriber(addr, sub.TargetType); err != nil {
 		if e := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
 			Subscription: &tpb.Subscription{
 				TargetType: sub.TargetType,
@@ -713,6 +713,9 @@ func (s *Server) deleteTarget(addr net.Addr, target *tpb.Target, ack bool) error
 		if err := s.sc.DeleteTargetHandler(t); err != nil {
 			return fmt.Errorf("error calling target deletion handler client: %v", err)
 		}
+	}
+	if err := s.deleteSubscriber(addr, ""); err != nil {
+		return fmt.Errorf("failed to delete %q from subscription list: %v", target.TargetId, err)
 	}
 	if err := s.sendUpdates(t, false); err != nil {
 		return fmt.Errorf("failed to send target subscription updates: %v", err)
