@@ -638,11 +638,10 @@ func (s *Server) sendUpdate(addr net.Addr, target Target, add bool) error {
 	}
 
 	clientInfo := s.clientInfo(addr)
-	rs := clientInfo.rs
-	if rs == nil {
-		return fmt.Errorf("reg stream for client %s is nil", addr)
+	if clientInfo.IsZero() {
+		return fmt.Errorf("trying to send update to a non-existing client %s", addr)
 	}
-	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
+	if err := clientInfo.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
 		TargetId:   target.ID,
 		TargetType: target.Type,
 		Op:         op,
