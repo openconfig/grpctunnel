@@ -18,6 +18,7 @@ James Protzman, Carl Lebsack, Rob Shakir
       - [Tag Field](#tag-field)
       - [Data Field](#data-field)
       - [Close Field](#close-field)
+    - [RegisterOp Message Fields](#registerop-message-fields)
     - [Session Message Fields](#session-message-fields)
       - [Tag Field](#tag-field-1)
       - [Accept Field](#accept-field)
@@ -121,7 +122,7 @@ The figure below illustrates the communication:
 
 ```
 service Tunnel {
-  rpc Register(stream Session) returns (stream Session);
+  rpc Register(stream RegisterOp) returns (stream RegisterOp);
   rpc Tunnel(stream Data) returns (stream Data);
 }
 
@@ -188,7 +189,7 @@ The tunnel proto defines a gRPC service, `Tunnel`, which defines two rpc
 methods:
 
 1. a `register` method which allows the tunnel server to request new tunnel
-streams from the client using [session messages](#session-message-fields), and
+streams from the client using [RegisterOp messages](#registerop-message-fields), and
 2. a `tunnel` method, which is used to create new tunnel streams. These streams
 forward the data from TCP streams over a bi-directional gRPC stream of [data
 messages](#data-message-fields).
@@ -215,6 +216,10 @@ The `close` field is used by the tunnel endpoints to know when forwarding has
 finished - usually signalled by the TCP connection reaching EOF or going idle.
 Once this boolean is set, the client and server will clean up the associated
 tunnel connections.
+
+### RegisterOp Message Fields
+
+RegisterOp can be one of Target, Session or Subscription message.
 
 ### Session Message Fields
 
