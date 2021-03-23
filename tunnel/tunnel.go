@@ -823,9 +823,9 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 	t := Target{ID: session.TargetId, Type: session.TargetType}
 	// If client is requesting a remote target, only call the bridge register handler.
 	// We might extend it to allow calling the customized handler in the future.
-	s.tmu.Lock()
+	s.tmu.RLock()
 	_, ok := s.rTargets[t]
-	s.tmu.Unlock()
+	s.tmu.RUnlock()
 	if ok {
 		err = s.bridgeRegHandler(ServerSession{addr, t})
 	} else {
@@ -870,7 +870,10 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 			// If client is requesting a remote target, only call the bridge handler.
 			// We might extend it to allow calling the customized handler in the future.
 			var err error
-			if _, ok := s.rTargets[t]; ok {
+			s.tmu.RLock()
+			_, ok := s.rTargets[t]
+			s.tmu.RUnlock()
+			if ok {
 				err = s.bridgeHandler(ServerSession{addr, t}, ioe.rwc)
 			} else {
 				err = s.sc.Handler(ServerSession{addr, t}, ioe.rwc)
