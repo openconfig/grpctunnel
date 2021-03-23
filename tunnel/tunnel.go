@@ -50,8 +50,9 @@ type regSafeStream struct {
 // Send blocks until it sends the provided data to the stream.
 func (r *regSafeStream) Send(data *tpb.RegisterOp) error {
 	r.w.Lock()
-	defer r.w.Unlock()
-	return r.regStream.Send(data)
+	err := r.regStream.Send(data)
+	r.w.Unlock()
+	return err
 }
 
 // dataStream abstracts the Tunnel Client and Server streams.
@@ -68,8 +69,9 @@ type dataSafeStream struct {
 // Send blocks until it sends the provided data to the stream.
 func (d *dataSafeStream) Send(data *tpb.Data) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.dataStream.Send(data)
+	err := d.dataStream.Send(data)
+	d.mu.Unlock()
+	return err
 }
 
 // ioStream defines a gRPC stream that implements io.ReadWriteCloser.
@@ -181,17 +183,17 @@ func (e *endpoint) addConnection(tag int32, addr net.Addr, ioe chan ioOrErr) err
 // deleteConnection deletes a connection from the endpoint conns map, if it exists.
 func (e *endpoint) deleteConnection(tag int32, addr net.Addr) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	delete(e.conns, session{tag, addr})
+	e.mu.Unlock()
 }
 
 // nextTag returns the next tag from the endpoint, and then increments it to
 // prevent tag collisions with other streams.
 func (e *endpoint) nextTag() int32 {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	tag := e.tag
 	e.tag += e.increment
+	e.mu.Unlock()
 	return tag
 }
 
@@ -416,17 +418,17 @@ func (s *Server) deleteTargetFromMap(t Target) error {
 // addTargetToClient adds a target to the clients map.
 func (s *Server) addTargetToClient(addr net.Addr, t Target) {
 	s.cmu.Lock()
-	defer s.cmu.Unlock()
 	// Already checked its entry does exists.
 	s.clients[addr].targets[t] = struct{}{}
+	s.cmu.Unlock()
 }
 
 // deleteTargetFromClient deletes a target to the clients map.
 func (s *Server) deleteTargetFromClient(addr net.Addr, t Target) {
 	s.cmu.Lock()
-	defer s.cmu.Unlock()
 	// Already checked its entry exists.
 	delete(s.clients[addr].targets, t)
+	s.cmu.Unlock()
 }
 
 // addTarget registers a target for a given client. It registers
@@ -821,7 +823,10 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 	t := Target{ID: session.TargetId, Type: session.TargetType}
 	// If client is requesting a remote target, only call the bridge register handler.
 	// We might extend it to allow calling the customized handler in the future.
-	if _, ok := s.rTargets[t]; ok {
+	s.tmu.Lock()
+	_, ok := s.rTargets[t]
+	s.tmu.Unlock()
+	if ok {
 		err = s.bridgeRegHandler(ServerSession{addr, t})
 	} else {
 		err = s.sc.RegisterHandler(ServerSession{addr, t})
