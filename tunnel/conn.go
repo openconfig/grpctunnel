@@ -199,13 +199,14 @@ func Listen(ctx context.Context, addr string, cert string, targets map[Target]st
 
 		// tunnel client establishes a tunnel session if it succeeded.
 		// retry if it fails.
-		select {
-		case err := <-l.chErr:
-			log.Printf("failed to get tunnel listener: %v", err)
-		default:
-		}
 		duration := bo.NextBackOff()
 		log.Printf("Tunnel listener will retry in %s.", duration)
-		time.Sleep(duration)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("tunnel listener context canceled")
+		case err := <-l.chErr:
+			log.Printf("failed to get tunnel listener: %v", err)
+		case <-time.After(duration):
+		}
 	}
 }
