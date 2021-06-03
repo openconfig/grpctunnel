@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"google3/third_party/golang/grpctunnel/tunnel/tunnel"
+	"github.com/openconfig/grpctunnel/tunnel"
 )
 
 func TestListen(t *testing.T) {
