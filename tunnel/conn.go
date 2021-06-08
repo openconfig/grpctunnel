@@ -196,6 +196,9 @@ func Listen(ctx context.Context, addr string, cert string, targets map[Target]st
 			}()
 			return l, nil
 		}
+		if err := l.Close(); err != nil {
+			log.Printf("%v", err)
+		}
 
 		// tunnel client establishes a tunnel session if it succeeded.
 		// retry if it fails.
