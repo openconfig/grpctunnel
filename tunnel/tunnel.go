@@ -559,6 +559,9 @@ func (s *Server) subscribe(addr net.Addr, sub *tpb.Subscription) error {
 
 	// Send ack.
 	clientInfo := s.clientInfo(addr)
+	if clientInfo.IsZero() {
+		return fmt.Errorf("failed to send subscription ack for %s, its clientInfo", addr)
+	}
 	rs := clientInfo.rs
 	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
 		Subscription: &tpb.Subscription{
@@ -638,8 +641,10 @@ func (s *Server) sendUpdate(addr net.Addr, target Target, add bool) error {
 	}
 
 	clientInfo := s.clientInfo(addr)
-	rs := clientInfo.rs
-	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
+	if clientInfo.IsZero() {
+		return fmt.Errorf("trying to send update to a non-existing client %s", addr)
+	}
+	if err := clientInfo.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
 		TargetId:   target.ID,
 		TargetType: target.Type,
 		Op:         op,
