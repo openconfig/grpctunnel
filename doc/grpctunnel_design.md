@@ -208,8 +208,8 @@ tunnel streams are used to forward the correct TCP client connections.
 
 #### Data Field
 
-The `data` field is used to encapsulate raw bytes received from the tunnel 
-client code. This data will be forwarded, unchanged through the tunnel 
+The `data` field is used to encapsulate raw bytes received from the client code. 
+This data will be forwarded, unchanged through the tunnel 
 endpoints, to the proper destination. This allows the tunnel to potentially 
 handle non-gRPC connections.
 
@@ -334,7 +334,7 @@ listening, it will accept a connection from a tunnel client. The new tunnel
 server will then wait for new session requests.
 
 When `NewSession` is called on the tunnel server, it will send a register 
-request, with an ack to the tunnel client. The tunnel client will then check if 
+request, with an accept to the tunnel client. The tunnel client will then check if 
 it can handle the request, and if it can, it will create a new tunnel session 
 to the tunnel server. The tunnel session is then forwarded to the tunnel client 
 handler function on the tunnel client, and returned to the `NewSession` request 
