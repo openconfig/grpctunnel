@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-proto_imports=".:${GOPATH}/src/github.com/google/protobuf/src:${GOPATH}/src"
+proto_imports=".:${GOPATH}/src/google.golang.org/protobuf:${GOPATH}/src"
 
 # Go
 protoc -I=$proto_imports --go_out=paths=source_relative:. proto/tunnel/tunnel.proto --go-grpc_out=.
