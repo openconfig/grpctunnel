@@ -195,7 +195,7 @@ func (e *endpoint) nextTag() int32 {
 	return tag
 }
 
-// ServerRegHandlerFunc defines the Targets that the handler function can accept.
+// ServerRegHandlerFunc defines the targets that the handler function can accept.
 // It is only called when the server accepts new session from the client.
 type ServerRegHandlerFunc func(ss ServerSession) error
 
@@ -1086,7 +1086,7 @@ type ClientPeerAddHandlerFunc func(target Target) error
 // ClientPeerDelHandlerFunc is called when a peer target is deleted.
 type ClientPeerDelHandlerFunc func(target Target) error
 
-// ClientRegHandlerFunc defines the Targets that the handler function can accept.
+// ClientRegHandlerFunc defines the targets that the handler function can accept.
 type ClientRegHandlerFunc func(target Target) error
 
 // ClientHandlerFunc handles sessions the client receives from the server.
@@ -1171,8 +1171,7 @@ func NewClient(tc tpb.TunnelClient, cc ClientConfig, ts map[Target]struct{}) (*C
 	}, nil
 }
 
-// NewSession requests a new stream identified on the server side
-// by Target.
+// NewSession requests a new stream identified on the server side by target.
 func (c *Client) NewSession(target Target) (_ io.ReadWriteCloser, err error) {
 	c.cmu.RLock()
 	defer c.cmu.RUnlock()
