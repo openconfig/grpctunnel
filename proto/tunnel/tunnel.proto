@@ -67,10 +67,10 @@ message Target {
     REMOVE = 2;
   }
   TargetOp op = 1;
-  // Used to ack the registration of target_id and target_type.
+  // Used to ack the registration of target and target_type.
   bool accept = 2;
-  // Target id identifies which handler to use for a tunnel stream.
-  string target_id = 3;
+  // Target identifies which handler to use for a tunnel stream.
+  string target = 3;
   // String value of the corresponding TargetType for a standard protocol.
   // A non-enumerated protocol is supported so long as both tunnel client and
   // server are in agreement on a particular value.
@@ -83,8 +83,8 @@ message Session {
   int32 tag = 1;
   // Used to ack the connection tag.
   bool accept = 2;
-  // Target id identifies which handler to use for a tunnel stream.
-  string target_id = 3;
+  // Target identifies which handler to use for a tunnel stream.
+  string target = 3;
   // String value of the corresponding TargetType for a standard protocol.
   // A non-enumerated protocol is supported so long as both tunnel client and
   // server are in agreement on a particular value.

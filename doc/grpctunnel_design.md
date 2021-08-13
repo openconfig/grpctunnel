@@ -156,7 +156,7 @@ message Target {
   }
   TargetOp op = 1;
   bool accept = 2;
-  string target_id = 3;
+  string target = 3;
   string target_type = 4;
   string error = 5;
 }
@@ -164,7 +164,7 @@ message Target {
 message Session {
   int32 tag = 1;
   bool accept = 2;
-  string target_id = 3;
+  string target = 3;
   string target_type = 4;
   string error = 5;
 }
@@ -242,14 +242,14 @@ tunnel client to be handled correctly.
 
 #### Target ID Field
 
-The `target_id` field is used by the register handler on either the tunnel
-server or tunnel client to define what the handler function can handle. This is
+The `target` field is used by the register handler on either the tunnel
+server or client to define what the handler function can handle. This is
 explained in more detail in the [handlers](#handler-field) sections below.
 
 #### Target Type Field
 
 The `target_type` represents the type of targets. It is use together with 
-target_id in most cases.
+target in most cases.
 
 #### Error Field
 
