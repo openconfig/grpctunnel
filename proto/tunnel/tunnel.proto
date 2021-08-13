@@ -83,7 +83,7 @@ message Session {
   int32 tag = 1;
   // Used to ack the connection tag.
   bool accept = 2;
-  // Target id identifies which handler to use for a tunnel stream.
+  // Target identifies which handler to use for a tunnel stream.
   string target = 3;
   // String value of the corresponding TargetType for a standard protocol.
   // A non-enumerated protocol is supported so long as both tunnel client and

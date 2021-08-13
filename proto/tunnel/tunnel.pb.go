@@ -449,7 +449,7 @@ type Session struct {
 	Tag int32 `protobuf:"varint,1,opt,name=tag,proto3" json:"tag,omitempty"`
 	// Used to ack the connection tag.
 	Accept bool `protobuf:"varint,2,opt,name=accept,proto3" json:"accept,omitempty"`
-	// Target id identifies which handler to use for a tunnel stream.
+	// Target identifies which handler to use for a tunnel stream.
 	Target string `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
 	// String value of the corresponding TargetType for a standard protocol.
 	// A non-enumerated protocol is supported so long as both tunnel client and
