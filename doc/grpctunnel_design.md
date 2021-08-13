@@ -208,8 +208,8 @@ tunnel streams are used to forward the correct TCP client connections.
 
 #### Data Field
 
-The `data` field is used to encapsulate raw bytes received from the 
-client code. This data will be forwarded, unchanged through the tunnel 
+The `data` field is used to encapsulate raw bytes received from the client code. 
+This data will be forwarded, unchanged through the tunnel 
 endpoints, to the proper destination. This allows the tunnel to potentially 
 handle non-gRPC connections.
 
