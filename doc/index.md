@@ -3,6 +3,7 @@
 A TCP over gRPC transport bi-directional tunnel written in Go.
 
 *   [Design Document](grpctunnel_design.md)
+*   [gNMI/gNOI/ssh dial-out via grpctunnel](https://github.com/openconfig/reference/blob/master/rpc/gnmi/gnmignoissh-dialout-grpctunnel.md)
 *   [Successful New Session On Server](successfulnewsessiononserver.md)
 *   [Failed New Session On Server](failednewsessiononserver.md)
 *   [Successful New Session On Client](successfulnewsessiononclient.md)
