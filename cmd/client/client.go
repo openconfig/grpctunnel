@@ -24,13 +24,13 @@
 //		--dial_target=target1 \
 //		--dial_target_type=SSH" $USER@localhost
 // mTLS:
-// ssh -o ProxyCommand="client
-// --tunnel_server_address=localhost:$PORT \
-// --cert_file=$CERT_FILE \
-// --key_file=$KEY_FILE \
-// --ca_file=$CA_FILE \
-// --dial_target=target1 \
-// --dial_target_type=SSH" $USER@localhost
+//		ssh -o ProxyCommand="client
+//		--tunnel_server_address=localhost:$PORT \
+//		--cert_file=$CERT_FILE \
+//		--key_file=$KEY_FILE \
+//		--ca_file=$CA_FILE \
+//		--dial_target=target1 \
+//		--dial_target_type=SSH" $USER@localhost
 package main
 
 import (
