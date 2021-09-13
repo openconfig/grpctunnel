@@ -57,7 +57,7 @@ var (
 	dialTargetType = flag.String("dial_target_type", "", "The type of target protocol, e.g. GNMI or SSH.")
 	certFile       = flag.String("cert_file", "", "The certificate file location. If both cert_file and key_file are provided, mTLS will be used.")
 	keyFile        = flag.String("key_file", "", "The private key file location. If both cert_file and key_file are provided, mTLS will be used.")
-	caFile         = flag.String("ca_file", "", "The CA file location (for mTLS)")
+	caFile         = flag.String("ca_file", "", "The CA file location.")
 
 	// for setting retry backoff when waiting for target.
 	retryBaseDelay     = time.Second
