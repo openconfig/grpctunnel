@@ -43,6 +43,8 @@ type TLS struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
+	// If both cert_file and key_file are provided, then mTLS will be used.
+	// Otherwise, server side TLS will be used (ca_file used for client side for validation).
 	CertFile string `protobuf:"bytes,1,opt,name=cert_file,json=certFile,proto3" json:"cert_file,omitempty"`
 	KeyFile  string `protobuf:"bytes,2,opt,name=key_file,json=keyFile,proto3" json:"key_file,omitempty"`
 	CaFile   string `protobuf:"bytes,3,opt,name=ca_file,json=caFile,proto3" json:"ca_file,omitempty"`

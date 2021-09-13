@@ -72,8 +72,8 @@ func runTargets(ctx context.Context, targets []*tcpb.TunnelTarget, server *tcpb.
 	var opts []grpc.DialOption
 	var err error
 	cred := server.GetCredentials().GetTls()
-	if len(cred.GetCaFile()) == 0 {
-		opts, err = tunnel.DialTLSCredsOpts(cred.GetCertFile())
+	if len(cred.GetCertFile()) == 0 || len(cred.GetKeyFile()) == 0 {
+		opts, err = tunnel.DialTLSCredsOpts(cred.GetCaFile())
 	} else {
 		opts, err = tunnel.DialmTLSCredsOpts(cred.GetCertFile(), cred.GetKeyFile(), cred.GetCaFile())
 	}

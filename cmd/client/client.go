@@ -55,9 +55,9 @@ var (
 	tunnelAddress  = flag.String("tunnel_server_address", "", "The address of the tunnel")
 	dialTarget     = flag.String("dial_target", "", "The client uses target to register at the server.")
 	dialTargetType = flag.String("dial_target_type", "", "The type of target protocol, e.g. GNMI or SSH.")
-	certFile       = flag.String("cert_file", "", "The certificate file location")
-	keyFile        = flag.String("key_file", "", "The private key file location")
-	caFile         = flag.String("ca_file", "", "The CA file location (for mTLS). If provided, it will be handled as mTLS")
+	certFile       = flag.String("cert_file", "", "The certificate file location. If both cert_file and key_file are provided, mTLS will be used.")
+	keyFile        = flag.String("key_file", "", "The private key file location. If both cert_file and key_file are provided, mTLS will be used.")
+	caFile         = flag.String("ca_file", "", "The CA file location (for mTLS)")
 
 	// for setting retry backoff when waiting for target.
 	retryBaseDelay     = time.Second
@@ -94,8 +94,8 @@ func getBackOff() *backoff.ExponentialBackOff {
 func run(ctx context.Context, conf config) error {
 	var opts []grpc.DialOption
 	var err error
-	if len(conf.caFile) == 0 {
-		opts, err = tunnel.DialTLSCredsOpts(conf.certFile)
+	if len(conf.certFile) == 0 || len(conf.keyFile) == 0 {
+		opts, err = tunnel.DialTLSCredsOpts(conf.caFile)
 	} else {
 		opts, err = tunnel.DialmTLSCredsOpts(conf.certFile, conf.keyFile, conf.caFile)
 	}
