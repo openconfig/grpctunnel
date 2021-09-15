@@ -20,3 +20,4 @@ proto_imports=".:${GOPATH}/src/google.golang.org/protobuf:${GOPATH}/src"
 
 # Go
 protoc -I=$proto_imports --go_out=paths=source_relative:. proto/tunnel/tunnel.proto --go-grpc_out=.
+protoc -I=$proto_imports --go_out=paths=source_relative:. cmd/target/proto/config/target_config.proto --go-grpc_out=.

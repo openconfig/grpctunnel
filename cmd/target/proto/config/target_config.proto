@@ -1,0 +1,54 @@
+//
+// Copyright 2019 Google Inc. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+// Version: 0.1
+
+syntax = "proto3";
+
+package targetconfig;
+
+option go_package = "github.com/openconfig/grpctunnel/cmd/target/proto/targetconfig";
+
+message TLS {
+  // If both cert_file and key_file are provided, then mTLS will be used. 
+  // Otherwise, server side TLS will be used (ca_file used for client side for validation).
+  string cert_file = 1;
+  string key_file = 2;
+  string ca_file = 3;
+}
+
+message Credentials {
+  TLS tls = 1;
+}
+
+message TunnelServer {
+  string tunnel_server_address = 1;
+  Credentials credentials = 2;
+}
+
+message TunnelTarget {
+  repeated TunnelServer tunnel_server = 1;
+  string target = 2;
+  string type = 3;
+  string dial_address = 4;
+}
+
+message TunnelTargetConfig {
+  // Tunnels dialed for targets if not specified within a given target.
+  repeated TunnelServer tunnel_server_default = 1;
+  // Targets made available over remote tunnel servers.
+  repeated TunnelTarget tunnel_target = 2;
+}
