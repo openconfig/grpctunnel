@@ -46,31 +46,13 @@ func (tc *Conn) SetReadDeadline(t time.Time) error { return nil }
 // SetWriteDeadline is trivial implementation, in order to match interface net.Conn.
 func (tc *Conn) SetWriteDeadline(t time.Time) error { return nil }
 
-// ServerConn (re-)tries and returns a tunnel connection.
-func ServerConn(ctx context.Context, ts *Server, addr string, target *Target) (*Conn, error) {
-	bo := backoff.NewExponentialBackOff()
-	bo.MaxElapsedTime = 0 // Retry Subscribe indefinitely.
-	bo.InitialInterval = RetryBaseDelay
-	bo.MaxInterval = RetryMaxDelay
-	bo.RandomizationFactor = RetryRandomization
-
-	for {
-		session, err := ts.NewSession(ctx, ServerSession{Target: *target})
-		if err == nil {
-			return &Conn{session}, nil
-		}
-		duration := bo.NextBackOff()
-		log.Printf("Failed to get tunnel connection: %v.\nRetrying in %s.", err, duration)
-		time.Sleep(duration)
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
+// ServerConn returns a tunnel connection.
+func ServerConn(ctx context.Context, ts *Server, target *Target) (*Conn, error) {
+	session, err := ts.NewSession(ctx, ServerSession{Target: *target})
+	if err == nil {
+		return &Conn{session}, nil
 	}
-
+	return nil, err
 }
 
 func registerTunnelClient(ctx context.Context, addr string, cert string, l *Listener,
