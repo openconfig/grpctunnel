@@ -559,6 +559,9 @@ func (s *Server) subscribe(addr net.Addr, sub *tpb.Subscription) error {
 
 	// Send ack.
 	clientInfo := s.clientInfo(addr)
+	if clientInfo.IsZero() {
+		return fmt.Errorf("failed to send subscription ack for %s, its clientInfo", addr)
+	}
 	rs := clientInfo.rs
 	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
 		Subscription: &tpb.Subscription{
@@ -638,6 +641,9 @@ func (s *Server) sendUpdate(addr net.Addr, target Target, add bool) error {
 	}
 
 	clientInfo := s.clientInfo(addr)
+	if clientInfo.IsZero() {
+		return fmt.Errorf("trying to send update to a non-existing client %s", addr)
+	}
 	rs := clientInfo.rs
 	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
 		Target:     target.ID,
@@ -825,7 +831,8 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 	t := Target{ID: session.Target, Type: session.TargetType}
 	// If client is requesting a remote target, only call the bridge register handler.
 	// We might extend it to allow calling the customized handler in the future.
-	if _, ok := s.rTargets[t]; ok {
+	tc := s.clientFromTarget(t)
+	if tc != nil {
 		err = s.bridgeRegHandler(ServerSession{addr, t})
 	} else {
 		err = s.sc.RegisterHandler(ServerSession{addr, t})
@@ -869,7 +876,8 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 			// If client is requesting a remote target, only call the bridge handler.
 			// We might extend it to allow calling the customized handler in the future.
 			var err error
-			if _, ok := s.rTargets[t]; ok {
+			tc := s.clientFromTarget(t)
+			if tc != nil {
 				err = s.bridgeHandler(ServerSession{addr, t}, ioe.rwc)
 			} else {
 				err = s.sc.Handler(ServerSession{addr, t}, ioe.rwc)
