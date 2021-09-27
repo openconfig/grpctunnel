@@ -47,7 +47,7 @@ func (tc *Conn) SetReadDeadline(t time.Time) error { return nil }
 func (tc *Conn) SetWriteDeadline(t time.Time) error { return nil }
 
 // ServerConn (re-)tries and returns a tunnel connection.
-func ServerConn(ctx context.Context, ts *Server, addr string, target *Target) (*Conn, error) {
+func ServerConn(ctx context.Context, ts *Server, target *Target) (*Conn, error) {
 	bo := backoff.NewExponentialBackOff()
 	bo.MaxElapsedTime = 0 // Retry Subscribe indefinitely.
 	bo.InitialInterval = RetryBaseDelay
