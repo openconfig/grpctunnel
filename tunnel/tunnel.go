@@ -744,19 +744,18 @@ func (s *Server) handleTarget(addr net.Addr, target *tpb.Target) error {
 }
 
 // deleteTargets unregisters all targets of a given client.
-func (s *Server) deleteTargets(addr net.Addr, ack bool) error {
+func (s *Server) deleteTargets(addr net.Addr, ack bool) {
 	if clientInfo := s.clientInfo(addr); clientInfo.IsZero() {
-		e := fmt.Errorf("client %q not registered", addr)
-		return e
+		fmt.Printf("client %q not registered", addr)
+		return
 	}
 
 	for target := range s.clientTargets(addr) {
 		t := tpb.Target{Target: target.ID, TargetType: target.Type}
 		if err := s.deleteTarget(addr, &t, ack); err != nil {
-			return err
+			fmt.Printf("error deleting %s:  %v\n", target, err)
 		}
 	}
-	return nil
 }
 
 // sendError receives error from Register in a non-blocking way.
