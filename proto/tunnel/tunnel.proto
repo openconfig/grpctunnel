@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-
+// 
+//
 // Version: 0.1
 
 syntax = "proto3";
@@ -52,6 +53,8 @@ enum TargetType {
   UNKNOWN = 0;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=22
   SSH = 22;
+  // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=830
+  NETCONF_SSH = 830;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=6653
   OPENFLOW = 6653;
   // https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=9339
