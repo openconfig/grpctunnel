@@ -574,21 +574,22 @@ func (s *Server) subscribe(addr net.Addr, sub *tpb.Subscription) error {
 	return nil
 }
 
-func (s *Server) deleteSubscriber(addr net.Addr, typ string) error {
+func (s *Server) deleteSubscriber(addr net.Addr, typ string) {
 	s.smu.Lock()
 	defer s.smu.Unlock()
 
 	if _, ok := s.sub[addr]; !ok {
-		return fmt.Errorf("client %s is not in subscription list", addr)
+		fmt.Printf("client %s is not in subscription list\n", addr)
+		return
 	}
 
 	if typ == "" {
 		delete(s.sub, addr)
-		return nil
+		return
 	}
 
 	delete(s.sub[addr], typ)
-	return nil
+	return
 }
 
 func (s *Server) unsubscribe(addr net.Addr, sub *tpb.Subscription) error {
@@ -597,18 +598,7 @@ func (s *Server) unsubscribe(addr net.Addr, sub *tpb.Subscription) error {
 		return fmt.Errorf("client %s is not registered", addr)
 	}
 	rs := clientInfo.rs
-
-	if err := s.deleteSubscriber(addr, sub.TargetType); err != nil {
-		if e := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
-			Subscription: &tpb.Subscription{
-				TargetType: sub.TargetType,
-				Op:         sub.Op,
-				Accept:     true}}}); e != nil {
-			return fmt.Errorf("failed to send unsubscription ack for %s: %v", addr, err)
-		}
-		return err
-	}
-
+	s.deleteSubscriber(addr, sub.TargetType)
 	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
 		Subscription: &tpb.Subscription{
 			TargetType: sub.TargetType,
@@ -721,9 +711,7 @@ func (s *Server) deleteTarget(addr net.Addr, target *tpb.Target, ack bool) error
 			return fmt.Errorf("error calling target deletion handler client: %v", err)
 		}
 	}
-	if err := s.deleteSubscriber(addr, ""); err != nil {
-		return fmt.Errorf("failed to delete %q from subscription list: %v", target.Target, err)
-	}
+	s.deleteSubscriber(addr, "")
 	if err := s.sendUpdates(t, false); err != nil {
 		return fmt.Errorf("failed to send target subscription updates: %v", err)
 	}
@@ -744,19 +732,18 @@ func (s *Server) handleTarget(addr net.Addr, target *tpb.Target) error {
 }
 
 // deleteTargets unregisters all targets of a given client.
-func (s *Server) deleteTargets(addr net.Addr, ack bool) error {
+func (s *Server) deleteTargets(addr net.Addr, ack bool) {
 	if clientInfo := s.clientInfo(addr); clientInfo.IsZero() {
-		e := fmt.Errorf("client %q not registered", addr)
-		return e
+		fmt.Printf("client %q not registered", addr)
+		return
 	}
 
 	for target := range s.clientTargets(addr) {
 		t := tpb.Target{Target: target.ID, TargetType: target.Type}
 		if err := s.deleteTarget(addr, &t, ack); err != nil {
-			return err
+			fmt.Printf("error deleting %s:  %v\n", target, err)
 		}
 	}
-	return nil
 }
 
 // sendError receives error from Register in a non-blocking way.
