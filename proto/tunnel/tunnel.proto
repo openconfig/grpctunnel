@@ -15,7 +15,7 @@
 //
 // 
 //
-// Version: 0.2 (PR#38,#45 added) 
+// Version: 0.2
 
 syntax = "proto3";
 
