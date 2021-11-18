@@ -1,7 +1,7 @@
 # TCP over gRPC Tunnel
 
 **Contributors**:
-James Protzman, Carl Lebsack, Rob Shakir, Gregory Soroka
+James Protzman, Carl Lebsack, Rob Shakir, Gregory Soroka, Eric Sporel
 
 **February, 2019**
 *Updated*: February 2021
