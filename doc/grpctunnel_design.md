@@ -1,7 +1,7 @@
 # TCP over gRPC Tunnel
 
 **Contributors**:
-James Protzman, Carl Lebsack, Rob Shakir
+James Protzman, Carl Lebsack, Rob Shakir, Gregory Soroka, Eric Sporel
 
 **February, 2019**
 *Updated*: February 2021
@@ -37,6 +37,7 @@ James Protzman, Carl Lebsack, Rob Shakir
     - [Tunnel Client](#tunnel-client)
     - [Tunnel Server](#tunnel-server)
     - [Target Registration](#target-registration)
+    - [Message Flow](#message-flow)
     - [Subscription](#subscription)
     - [Bridge Mode](#bridge-mode)
 
@@ -143,6 +144,7 @@ message RegisterOp {
 enum TargetType {
   UNKNOWN = 0;
   SSH = 22;
+  NETCONF_SSH = 830;
   OPENFLOW = 6653;
   GNMI_GNOI = 9339;
   P4_RUNTIME = 9559;
@@ -350,6 +352,12 @@ addition handler will be called.
 
 Once the tunnel is up running, subsequent addition and deletion of targets are 
 also supported.
+
+### Message Flow
+
+**Type 1 Tunnel Client to Tunnel Server Tunnel Call Flow**
+
+![Tunnel Call Flow](images/tunnelcallflow.png "Tunnel Call Flow")
 
 ### Subscription
 
