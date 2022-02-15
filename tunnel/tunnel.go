@@ -1011,9 +1011,9 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 		}
 		return nil, fmt.Errorf("no stream defined for %q", ss.Addr.String())
 	}
-	// If ss.Addr is not specified, the server will send a message to all clients.
-	// The first client which responds without error will be the one to handle
-	// the connection.
+	// If ss.Addr is not specified, the server will send a message to all
+	// clients with matched target. The first client which responds without
+	// error will be the one to handle the connection.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ch := make(chan io.ReadWriteCloser, len(s.clients))
