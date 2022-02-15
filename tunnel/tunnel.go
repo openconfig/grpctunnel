@@ -1022,6 +1022,9 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 	// This lock protects only the read of s.clients, and unlocks after the loop.
 	s.cmu.RLock()
 	for addr, clientInfo := range s.clients {
+		if _, ok := clientInfo.targets[ss.Target]; !ok {
+			continue
+		}
 		wg.Add(1)
 		go func(addr net.Addr, stream regStream) {
 			defer wg.Done()
