@@ -1011,9 +1011,9 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 		}
 		return nil, fmt.Errorf("no stream defined for %q", ss.Addr.String())
 	}
-	// If ss.Addr is not specified, the server will send a message to all clients.
-	// The first client which responds without error will be the one to handle
-	// the connection.
+	// If ss.Addr is not specified, the server will send a message to all
+	// clients with matched target. The first client which responds without
+	// error will be the one to handle the connection.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ch := make(chan io.ReadWriteCloser, len(s.clients))
@@ -1022,6 +1022,9 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 	// This lock protects only the read of s.clients, and unlocks after the loop.
 	s.cmu.RLock()
 	for addr, clientInfo := range s.clients {
+		if _, ok := clientInfo.targets[ss.Target]; !ok {
+			continue
+		}
 		wg.Add(1)
 		go func(addr net.Addr, stream regStream) {
 			defer wg.Done()
