@@ -998,16 +998,12 @@ func (c *Client) deletePeerTarget(t *tpb.Target) error {
 
 // NewSession requests a new stream identified on the client side by uniqueID.
 func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWriteCloser, error) {
-	if len(s.clients) == 0 {
-		return nil, errors.New("no clients connected")
-	}
-	tag := s.nextTag()
 	// If ss.Addr is specified, the NewSession request will attempt to create a
 	// new stream to an existing client.
 	if ss.Addr != nil {
 		regInfo := s.clientInfo(ss.Addr)
 		if !regInfo.IsZero() && regInfo.rs != nil {
-			return s.handleSession(ctx, tag, ss.Addr, ss.Target, regInfo.rs)
+			return s.handleSession(ctx, s.nextTag(), ss.Addr, ss.Target, regInfo.rs)
 		}
 		return nil, fmt.Errorf("no stream defined for %q", ss.Addr.String())
 	}
@@ -1016,11 +1012,16 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 	// error will be the one to handle the connection.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ch := make(chan io.ReadWriteCloser, len(s.clients))
-	errCh := make(chan error, len(s.clients))
 	var wg sync.WaitGroup
 	// This lock protects only the read of s.clients, and unlocks after the loop.
 	s.cmu.RLock()
+	if len(s.clients) == 0 {
+		s.cmu.RUnlock()
+		return nil, errors.New("no clients connected")
+	}
+	ch := make(chan io.ReadWriteCloser, len(s.clients))
+	errCh := make(chan error, len(s.clients))
+	tag := s.nextTag()
 	for addr, clientInfo := range s.clients {
 		if _, ok := clientInfo.targets[ss.Target]; !ok {
 			continue
