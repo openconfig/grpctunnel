@@ -106,8 +106,8 @@ message Session {
 message Subscription {
   enum SubscriptionOp {
     UNKNOWN = 0;
-    SUBCRIBE = 1;
-    UNSUBCRIBE = 2;
+    SUBSCRIBE = 1;
+    UNSUBSCRIBE = 2;
   }
   SubscriptionOp op = 1;
   // Used to ack the registration of (un)subscription.
