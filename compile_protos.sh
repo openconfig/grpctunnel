@@ -16,8 +16,19 @@
 
 set -euo pipefail
 
-proto_imports=".:${GOPATH}/src/google.golang.org/protobuf:${GOPATH}/src"
+proto_imports=".:${GOPATH}/src"
 
 # Go
-protoc -I=$proto_imports --go_out=paths=source_relative:. proto/tunnel/tunnel.proto --go-grpc_out=.
-protoc -I=$proto_imports --go_out=paths=source_relative:. cmd/target/proto/config/target_config.proto --go-grpc_out=.
+protoc -I="${proto_imports}" \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    --go_out=. --go_opt=paths=source_relative proto/types/types.proto
+
+protoc -I="${proto_imports}" \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    --go_opt=Mproto/types/types.proto=github.com/openconfig/grpctunnel/proto/types \
+    --go_out=. --go_opt=paths=source_relative proto/tunnel/tunnel.proto
+
+protoc -I="${proto_imports}" \
+    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+    --go_opt=Mproto/types/types.proto=github.com/openconfig/grpctunnel/proto/types \
+    --go_out=. --go_opt=paths=source_relative cmd/target/proto/config/target_config.proto

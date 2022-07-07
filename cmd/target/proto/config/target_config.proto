@@ -14,11 +14,13 @@
 // limitations under the License.
 //
 
-// Version: 0.1
-
 syntax = "proto3";
 
+import "github.com/openconfig/grpctunnel/proto/types/types.proto";
+
 package targetconfig;
+
+option (grpctunnel.types.version) = "0.1.0";
 
 option go_package = "github.com/openconfig/grpctunnel/cmd/target/proto/targetconfig";
 
