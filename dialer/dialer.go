@@ -36,6 +36,12 @@ type ServerDialer struct {
 	ts *tunnel.Server
 }
 
+var (
+	serverConn      = tunnel.ServerConn
+	clientConn      = tunnel.ClientConn
+	grpcDialContext = grpc.DialContext
+)
+
 // FromClient creates a new target dialer with an existing tunnel client
 // connection.
 // Sample code with error handling elided:
@@ -74,18 +80,18 @@ func FromServer(ts *tunnel.Server) (*ServerDialer, error) {
 // conn, err := d.DialContext(ctx, "target2", "target-type2", opts2)
 func (d *ClientDialer) DialContext(ctx context.Context, target, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
 	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-		return tunnel.ClientConn(ctx, d.tc, &tunnel.Target{ID: target, Type: targetType})
+		return clientConn(ctx, d.tc, &tunnel.Target{ID: target, Type: targetType})
 	})
 	opts = append(opts, withContextDialer)
-	return grpc.DialContext(ctx, target, opts...)
+	return grpcDialContext(ctx, target, opts...)
 }
 
 // DialContext establishes a grpc.Conn to the attached tunnel server and
 // returns an error if the connection is not established.
 func (d *ServerDialer) DialContext(ctx context.Context, target string, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
 	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-		return tunnel.ServerConn(ctx, d.ts, &tunnel.Target{ID: target, Type: targetType})
+		return serverConn(ctx, d.ts, &tunnel.Target{ID: target, Type: targetType})
 	})
 	opts = append(opts, withContextDialer)
-	return grpc.DialContext(ctx, target, opts...)
+	return grpcDialContext(ctx, target, opts...)
 }
