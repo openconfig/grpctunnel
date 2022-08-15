@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package dialer implements a gRPC dialer over a tunnel client connection.
+// Package dialer implements a gRPC dialer over a tunneled connection.
 package dialer
 
 import (
@@ -22,27 +22,28 @@ import (
 	"fmt"
 	"net"
 
-	"google3/third_party/golang/grpc/grpc"
-	"google3/third_party/golang/grpctunnel/tunnel/tunnel"
+	"github.com/openconfig/grpctunnel/tunnel/tunnel"
+	"google.golang.org/grpc"
 )
 
-// Dialer performs dialing to targets behind a given tunnel connection.
-type Dialer struct {
+// ClientDialer performs dialing to targets behind a given tunnel connection.
+type ClientDialer struct {
 	tc *tunnel.Client
 }
 
-// New creates a new target dialer with an existing tunnel client connection.
+// FromClient creates a new target dialer with an existing tunnel client
+// connection.
 // Sample code with error handling elided:
 //
 // conn, err := grpc.DialContext(ctx, tunnelAddress)
 // client := tpb.NewTunnelClient(conn)
 // tc := tunnel.NewClient(client, tunnel.ClientConfig{}, nil)
-// d := dialer.New(tc)
-func New(tc *tunnel.Client) (*Dialer, error) {
+// d := dialer.FromClient(tc)
+func FromClient(tc *tunnel.Client) (*ClientDialer, error) {
 	if tc == nil {
 		return nil, fmt.Errorf("tunnel server connection is nil")
 	}
-	return &Dialer{tc: tc}, nil
+	return &ClientDialer{tc: tc}, nil
 }
 
 // DialContext establishes a grpc.Conn to a remote tunnel client via the
@@ -54,7 +55,7 @@ func New(tc *tunnel.Client) (*Dialer, error) {
 //
 // conn, err := d.DialContext(ctx, "target1", "target-type1", opts1)
 // conn, err := d.DialContext(ctx, "target2", "target-type2", opts2)
-func (d *Dialer) DialContext(ctx context.Context, target, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
+func (d *ClientDialer) DialContext(ctx context.Context, target, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
 	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 		session, err := d.tc.NewSession(tunnel.Target{ID: target, Type: targetType})
 		if err != nil {
