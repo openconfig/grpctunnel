@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/openconfig/grpctunnel/tunnel/tunnel"
+	"github.com/openconfig/grpctunnel/tunnel"
 	"google.golang.org/grpc"
 )
 
@@ -51,11 +51,9 @@ func FromClient(tc *tunnel.Client) (*ClientDialer, error) {
 	return &ClientDialer{tc: tc}, nil
 }
 
-// FromServer creates a new collector dialer with an existing tunnel server
-// connection.
+// FromServer creates a new collector dialer with an existing tunnel server.
 // Sample code with error handling elided:
 //
-// conn, err := grpc.DialContext(ctx, tunnelAddress)
 // ts := tunnel.NewServer(tunnel.ServerConfig{})
 // d := dialer.FromServer(ts)
 func FromServer(ts *tunnel.Server) (*ServerDialer, error) {
@@ -74,9 +72,9 @@ func FromServer(ts *tunnel.Server) (*ServerDialer, error) {
 //
 // conn, err := d.DialContext(ctx, "target1", "target-type1", opts1)
 // conn, err := d.DialContext(ctx, "target2", "target-type2", opts2)
-func (cd *ClientDialer) DialContext(ctx context.Context, target, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
+func (d *ClientDialer) DialContext(ctx context.Context, target, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
 	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-		return tunnel.ClientConn(ctx, cd.tc, &tunnel.Target{ID: target, Type: targetType})
+		return tunnel.ClientConn(ctx, d.tc, &tunnel.Target{ID: target, Type: targetType})
 	})
 	opts = append(opts, withContextDialer)
 	return grpc.DialContext(ctx, target, opts...)
@@ -84,9 +82,9 @@ func (cd *ClientDialer) DialContext(ctx context.Context, target, targetType stri
 
 // DialContext establishes a grpc.Conn to the attached tunnel server and
 // returns an error if the connection is not established.
-func (sd *ServerDialer) DialContext(ctx context.Context, target string, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
+func (d *ServerDialer) DialContext(ctx context.Context, target string, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
 	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-		return tunnel.ServerConn(ctx, sd.ts, &tunnel.Target{ID: target, Type: targetType})
+		return tunnel.ServerConn(ctx, d.ts, &tunnel.Target{ID: target, Type: targetType})
 	})
 	opts = append(opts, withContextDialer)
 	return grpc.DialContext(ctx, target, opts...)
