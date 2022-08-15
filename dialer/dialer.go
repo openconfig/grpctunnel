@@ -22,13 +22,18 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/openconfig/grpctunnel/tunnel/tunnel"
+	"github.com/openconfig/grpctunnel/tunnel"
 	"google.golang.org/grpc"
 )
 
 // ClientDialer performs dialing to targets behind a given tunnel connection.
 type ClientDialer struct {
 	tc *tunnel.Client
+}
+
+// ServerDialer performs dialing to collector via a given tunnel connection.
+type ServerDialer struct {
+	ts *tunnel.Server
 }
 
 // FromClient creates a new target dialer with an existing tunnel client
@@ -41,9 +46,21 @@ type ClientDialer struct {
 // d := dialer.FromClient(tc)
 func FromClient(tc *tunnel.Client) (*ClientDialer, error) {
 	if tc == nil {
-		return nil, fmt.Errorf("tunnel server connection is nil")
+		return nil, fmt.Errorf("tunnel client connection is nil")
 	}
 	return &ClientDialer{tc: tc}, nil
+}
+
+// FromServer creates a new collector dialer with an existing tunnel server.
+// Sample code with error handling elided:
+//
+// ts := tunnel.NewServer(tunnel.ServerConfig{})
+// d := dialer.FromServer(ts)
+func FromServer(ts *tunnel.Server) (*ServerDialer, error) {
+	if ts == nil {
+		return nil, fmt.Errorf("tunnel server connection is nil")
+	}
+	return &ServerDialer{ts: ts}, nil
 }
 
 // DialContext establishes a grpc.Conn to a remote tunnel client via the
@@ -57,13 +74,18 @@ func FromClient(tc *tunnel.Client) (*ClientDialer, error) {
 // conn, err := d.DialContext(ctx, "target2", "target-type2", opts2)
 func (d *ClientDialer) DialContext(ctx context.Context, target, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
 	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-		session, err := d.tc.NewSession(tunnel.Target{ID: target, Type: targetType})
-		if err != nil {
-			return nil, err
-		}
-		return &tunnel.Conn{session}, nil
+		return tunnel.ClientConn(ctx, d.tc, &tunnel.Target{ID: target, Type: targetType})
 	})
 	opts = append(opts, withContextDialer)
 	return grpc.DialContext(ctx, target, opts...)
 }
 
+// DialContext establishes a grpc.Conn to the attached tunnel server and
+// returns an error if the connection is not established.
+func (d *ServerDialer) DialContext(ctx context.Context, target string, targetType string, opts ...grpc.DialOption) (conn *grpc.ClientConn, err error) {
+	withContextDialer := grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+		return tunnel.ServerConn(ctx, d.ts, &tunnel.Target{ID: target, Type: targetType})
+	})
+	opts = append(opts, withContextDialer)
+	return grpc.DialContext(ctx, target, opts...)
+}
