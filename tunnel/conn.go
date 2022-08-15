@@ -49,7 +49,7 @@ func (tc *Conn) SetWriteDeadline(t time.Time) error { return nil }
 // ServerConn returns a tunnel connection.
 func ServerConn(ctx context.Context, ts *Server, target *Target) (*Conn, error) {
 	session, err := ts.NewSession(ctx, ServerSession{Target: *target})
-	if err == nil {
+	if err != nil {
 		return nil, err
 	}
 	return &Conn{session}, nil
@@ -60,7 +60,6 @@ func ClientConn(ctx context.Context, tc *Client, target *Target) (*Conn, error) 
 	session, err := tc.NewSession(*target)
 	if err != nil {
 		return nil, err
-
 	}
 	return &Conn{session}, nil
 }
