@@ -825,7 +825,7 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 	case s.sc.RegisterHandler != nil:
 		err = s.sc.RegisterHandler(ServerSession{addr, t})
 	default:
-		err = fmt.Errorf("no target %q of type %q registered", session.Target, session.TargetType) 
+		err = fmt.Errorf("no target %q of type %q registered", session.Target, session.TargetType)
 	}
 	if err != nil {
 		if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: tag, Error: err.Error()}}}); err != nil {
@@ -973,7 +973,10 @@ func (c *Client) addPeerTarget(t *tpb.Target) error {
 
 	c.peerTypeTargets[t.TargetType][Target{ID: t.Target, Type: t.TargetType}] = struct{}{}
 
-	return c.cc.PeerAddHandler(Target{ID: t.Target, Type: t.TargetType})
+	if c.cc.PeerAddHandler != nil {
+		return c.cc.PeerAddHandler(Target{ID: t.Target, Type: t.TargetType})
+	}
+	return nil
 }
 
 // PeerTargets returns all the peer targets matching the given type. If type is an empty string, it will return all targets.
@@ -999,7 +1002,10 @@ func (c *Client) deletePeerTarget(t *tpb.Target) error {
 	if _, ok := c.peerTypeTargets[t.TargetType]; !ok {
 		delete(c.peerTypeTargets[t.TargetType], Target{ID: t.Target, Type: t.TargetType})
 	}
-	return c.cc.PeerDelHandler(Target{ID: t.Target, Type: t.TargetType})
+	if c.cc.PeerDelHandler != nil {
+		return c.cc.PeerDelHandler(Target{ID: t.Target, Type: t.TargetType})
+	}
+	return nil
 }
 
 // NewSession requests a new stream identified on the client side by uniqueID.
@@ -1338,6 +1344,10 @@ func (c *Client) streamHandler(ctx context.Context, tag int32, t Target) (e erro
 		return nil
 	}
 	// Otherwise we attempt to handle the new target ID.
+	if c.cc.RegisterHandler == nil {
+		e = fmt.Errorf("no RegisterHandler provided")
+		return
+	}
 	if err = c.cc.RegisterHandler(t); err != nil {
 		e = fmt.Errorf("returnStream: error from RegisterHandler: %v", err)
 		return
@@ -1376,6 +1386,9 @@ func (c *Client) newClientStream(ctx context.Context, tag int32, t Target) error
 	stream, err := c.newTunnelStream(ctx, tag)
 	if err != nil {
 		return err
+	}
+	if c.cc.Handler == nil {
+		return fmt.Errorf("no Handler provided")
 	}
 	return c.cc.Handler(t, stream)
 }
