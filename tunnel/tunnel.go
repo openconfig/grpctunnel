@@ -819,10 +819,13 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 	// If client is requesting a remote target, only call the bridge register handler.
 	// We might extend it to allow calling the customized handler in the future.
 	tc := s.clientFromTarget(t)
-	if tc != nil {
+	switch {
+	case tc != nil:
 		err = s.bridgeRegHandler(ServerSession{addr, t})
-	} else {
+	case s.sc.RegisterHandler != nil:
 		err = s.sc.RegisterHandler(ServerSession{addr, t})
+	default:
+		err = fmt.Errorf("no target %q of type %q registered", session.Target, session.TargetType) 
 	}
 	if err != nil {
 		if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: tag, Error: err.Error()}}}); err != nil {
@@ -864,10 +867,13 @@ func (s *Server) newClientSession(ctx context.Context, session *tpb.Session, add
 			// We might extend it to allow calling the customized handler in the future.
 			var err error
 			tc := s.clientFromTarget(t)
-			if tc != nil {
+			switch {
+			case tc != nil:
 				err = s.bridgeHandler(ServerSession{addr, t}, ioe.rwc)
-			} else {
+			case s.sc.Handler != nil:
 				err = s.sc.Handler(ServerSession{addr, t}, ioe.rwc)
+			default:
+				err = fmt.Errorf("no target %q of type %q registered", session.Target, session.TargetType)
 			}
 			if err != nil {
 				s.sendError(err)
