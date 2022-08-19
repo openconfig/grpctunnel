@@ -1344,11 +1344,13 @@ func (c *Client) streamHandler(ctx context.Context, tag int32, t Target) (e erro
 		return nil
 	}
 	// Otherwise we attempt to handle the new target ID.
-	if c.cc.RegisterHandler != nil {
-		if err = c.cc.RegisterHandler(t); err != nil {
-			e = fmt.Errorf("returnStream: error from RegisterHandler: %v", err)
-			return
-		}
+	if c.cc.RegisterHandler == nil {
+		e = fmt.Errorf("no RegisterHandler provided")
+		return
+	}
+	if err = c.cc.RegisterHandler(t); err != nil {
+		e = fmt.Errorf("returnStream: error from RegisterHandler: %v", err)
+		return
 	}
 	if err = c.newClientStream(ctx, tag, t); err != nil {
 		e = fmt.Errorf("returnStream: error from handleNewClientStream: %v", err)
@@ -1385,10 +1387,10 @@ func (c *Client) newClientStream(ctx context.Context, tag int32, t Target) error
 	if err != nil {
 		return err
 	}
-	if c.cc.Handler != nil {
-		return c.cc.Handler(t, stream)
+	if c.cc.Handler == nil {
+		return fmt.Errorf("no Handler provided")
 	}
-	return nil
+	return c.cc.Handler(t, stream)
 }
 
 // newTunnelStream creates a new tunnel stream and sends tag to the server. The
