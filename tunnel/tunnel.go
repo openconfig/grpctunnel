@@ -489,9 +489,9 @@ func (s *Server) addTarget(addr net.Addr, target *tpb.Target) error {
 
 func (s *Server) handleSubscription(addr net.Addr, sub *tpb.Subscription) error {
 	switch op := sub.GetOp(); op {
-	case tpb.Subscription_SUBCRIBE:
+	case tpb.Subscription_SUBSCRIBE:
 		return s.subscribe(addr, sub)
-	case tpb.Subscription_UNSUBCRIBE:
+	case tpb.Subscription_UNSUBSCRIBE:
 		return s.unsubscribe(addr, sub)
 	default:
 		return fmt.Errorf("invalid subcription op: %d", op)
@@ -938,7 +938,7 @@ func (c *Client) Subscribe(typ string) error {
 	}
 
 	return c.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{Subscription: &tpb.Subscription{
-		Op:         tpb.Subscription_SUBCRIBE,
+		Op:         tpb.Subscription_SUBSCRIBE,
 		TargetType: typ,
 	}}})
 }
@@ -953,7 +953,7 @@ func (c *Client) Unsubscribe(typ string) error {
 	}
 
 	return c.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{Subscription: &tpb.Subscription{
-		Op:         tpb.Subscription_UNSUBCRIBE,
+		Op:         tpb.Subscription_UNSUBSCRIBE,
 		TargetType: typ,
 	}}})
 }
@@ -1314,7 +1314,7 @@ func (c *Client) Start(ctx context.Context) {
 		case *tpb.RegisterOp_Subscription:
 			sub := reg.GetSubscription()
 			op := sub.GetOp()
-			if op == tpb.Subscription_SUBCRIBE || op == tpb.Subscription_UNSUBCRIBE {
+			if op == tpb.Subscription_SUBSCRIBE || op == tpb.Subscription_UNSUBSCRIBE {
 				if !sub.GetAccept() {
 					err = fmt.Errorf("subscription request (%s) not accepted by server", sub.TargetType)
 					return

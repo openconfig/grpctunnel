@@ -13,18 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// 
 //
-// Version: 0.2
-
+//
+//
 syntax = "proto3";
+
+import "github.com/openconfig/grpctunnel/proto/types/types.proto";
 
 // Package grpctunnel defines a service specification for a TCP over gRPC proxy
 // interface. This interface is set so that the tunnel can act as a transparent
 // TCP proxy between a pair of gRPC client and server endpoints.
 package grpctunnel;
 
-option go_package = "proto/tunnel;grpctunnel";
+option (grpctunnel.types.version) = "0.3.0";
+
+option go_package = "github.com/openconfig/grpctunnel/proto/tunnel;grpctunnel";
 
 service Tunnel {
   // Register is used to register targets reachable via either the client
@@ -103,8 +106,8 @@ message Session {
 message Subscription {
   enum SubscriptionOp {
     UNKNOWN = 0;
-    SUBCRIBE = 1;
-    UNSUBCRIBE = 2;
+    SUBSCRIBE = 1;
+    UNSUBSCRIBE = 2;
   }
   SubscriptionOp op = 1;
   // Used to ack the registration of (un)subscription.
