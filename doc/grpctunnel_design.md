@@ -4,7 +4,8 @@
 James Protzman, Carl Lebsack, Rob Shakir, Johnson Xu, Gregory Soroka, Eric Sporel
 
 **February, 2019**
-*Updated*: February 2021
+
+*Updated*: July 2022
 
 <!-- MarkdownTOC -->
 
@@ -121,6 +122,8 @@ The figure below illustrates the communication:
 
 ### Tunnel Proto Design
 
+_version 0.3.0_
+
 ```
 service Tunnel {
   rpc Register(stream RegisterOp) returns (stream RegisterOp);
@@ -147,6 +150,7 @@ enum TargetType {
   NETCONF_SSH = 830;
   OPENFLOW = 6653;
   GNMI_GNOI = 9339;
+  GRIBI = 9340;
   P4_RUNTIME = 9559;
 }
 
@@ -175,8 +179,8 @@ message Session {
 message Subscription {
   enum SubscriptionOp {
     UNKNOWN = 0;
-    SUBCRIBE = 1;
-    UNSUBCRIBE = 2;
+    SUBSCRIBE = 1;
+    UNSUBSCRIBE = 2;
   }
   SubscriptionOp op = 1;
   bool accept = 2;
@@ -193,7 +197,7 @@ The tunnel proto defines a gRPC service, `Tunnel`, which defines two rpc
 methods:
 
 1. a `Register` method which allows the tunnel server to request new tunnel
-streams from the tunnel client using 
+streams from the tunnel client using
 [RegisterOp messages](#registerop-message-fields), and
 2. a `Tunnel` method, which is used to create new tunnel streams. These streams
 forward the data from TCP streams over a bi-directional gRPC stream of [data
@@ -210,16 +214,16 @@ tunnel streams are used to forward the correct TCP client connections.
 
 #### Data Field
 
-The `data` field is used to encapsulate raw bytes received from the client code. 
-This data will be forwarded, unchanged through the tunnel 
-endpoints, to the proper destination. This allows the tunnel to potentially 
+The `data` field is used to encapsulate raw bytes received from the client code.
+This data will be forwarded, unchanged through the tunnel
+endpoints, to the proper destination. This allows the tunnel to potentially
 handle non-gRPC connections.
 
 #### Close Field
 
 The `close` field is used by the tunnel endpoints to know when forwarding has
 finished - usually signalled by the TCP connection reaching EOF or going idle.
-Once this boolean is set, the tunnel client and tunnel server will clean up the 
+Once this boolean is set, the tunnel client and tunnel server will clean up the
 associated tunnel connections.
 
 ### RegisterOp Message Fields
@@ -250,24 +254,24 @@ explained in more detail in the [handlers](#handler-field) sections below.
 
 #### Target Type Field
 
-The `target_type` represents the type of targets. It is use together with 
+The `target_type` represents the type of targets. It is use together with
 target in most cases.
 
 #### Error Field
 
-The `error` field is used by the tunnel client and tunnel server to exchange 
+The `error` field is used by the tunnel client and tunnel server to exchange
 errors encountered when requesting new sessions.
 
 ### Target Message Fields
 
 #### Op Field
 
-The `op` field is used to represent different registration operations 
+The `op` field is used to represent different registration operations
 (ADD/REMOVE/UNKNOWN).
 
 #### Accept / Target ID/ Target Type / Error Fields
 
-These fields carry the same meaning as the corresponding fields in the Session 
+These fields carry the same meaning as the corresponding fields in the Session
 message.
 
 ### Subscription Message Fields
@@ -279,17 +283,17 @@ The `op` field is used to represent different subscription operations
 
 #### Accept Fields
 
-The `accept` field is sent by the tunnel server to indicate that the 
+The `accept` field is sent by the tunnel server to indicate that the
 subscription is successful.
 
 #### Target Type Fields
 
-The `type_type` field is used to indicate the eligible targets. If it is empty, 
+The `target_type` field is used to indicate the eligible targets. If it is empty,
 the server will assume that the tunnel client wants to subscribe everything.
 
 #### Error Fields
 
-The `error` field is used by the server to send back errors if the subscription 
+The `error` field is used by the server to send back errors if the subscription
 is unsuccessful.
 
 
@@ -303,27 +307,27 @@ what is done with a stream on the opposing side of a new session request.
 
 ### Tunnel Client
 
-A new client will be created and started using the `NewClient`. When the tunnel 
-client is started, it will attempt to connect to the tunnel server over the 
-register gRPC service. If it is successful, the tunnel client 
-[registers](#target-registration) its target id and target type. If configured, 
-the tunnel client will also [subscribe](#subscription) targets from the tunnel 
-server. At this point, the tunnel server and section](#server) below will cover 
+A new client will be created and started using the `NewClient`. When the tunnel
+client is started, it will attempt to connect to the tunnel server over the
+register gRPC service. If it is successful, the tunnel client
+[registers](#target-registration) its target id and target type. If configured,
+the tunnel client will also [subscribe](#subscription) targets from the tunnel
+server. At this point, the tunnel server and section](#server) below will cover
 new session requests from the tunnel server perspective.
 
-When `NewSession` is called on the tunnel client, it will send a register 
-request to the tunnel server. The tunnel server will check if it can handle the 
-register request via the tunnel server register handler. This handler will 
-return an error if it cannot handle the requested session. If it can handle it, 
-the tunnel server will send an accepted register session back to the tunnel 
-client and the tunnel client will start a new tunnel stream, using the tunnel 
-gRPC service. At this time, all register requests sent to the tunnel client 
-should contain the accept message. The rationale is that the tunnel client will 
-only receive requests from the tunnel server which are ready to have a new 
+When `NewSession` is called on the tunnel client, it will send a register
+request to the tunnel server. The tunnel server will check if it can handle the
+register request via the tunnel server register handler. This handler will
+return an error if it cannot handle the requested session. If it can handle it,
+the tunnel server will send an accepted register session back to the tunnel
+client and the tunnel client will start a new tunnel stream, using the tunnel
+gRPC service. At this time, all register requests sent to the tunnel client
+should contain the accept message. The rationale is that the tunnel client will
+only receive requests from the tunnel server which are ready to have a new
 tunnel session created for them.
 
-This stream is passed to the tunnel server handler function on the tunnel 
-server, and returned to `NewSession` on the tunnel client side. See the timing 
+This stream is passed to the tunnel server handler function on the tunnel
+server, and returned to `NewSession` on the tunnel client side. See the timing
 diagram below.
 
 ![Successful NewSession on Client](images/grpctunnel-client-newsession.png "Successful NewSession on Client")
@@ -331,26 +335,26 @@ diagram below.
 ### Tunnel Server
 
 A tunnel server will need to be created using `grpc.NewServer` and the exported
-`NewServer` method from this tunnel package.  Once the tunnel server is 
-listening, it will accept a connection from a tunnel client. The new tunnel 
+`NewServer` method from this tunnel package.  Once the tunnel server is
+listening, it will accept a connection from a tunnel client. The new tunnel
 server will then wait for new session requests.
 
-When `NewSession` is called on the tunnel server, it will send a register 
-request, with an accept to the tunnel client. The tunnel client will then check if 
-it can handle the request, and if it can, it will create a new tunnel session 
-to the tunnel server. The tunnel session is then forwarded to the tunnel client 
-handler function on the tunnel client, and returned to the `NewSession` request 
+When `NewSession` is called on the tunnel server, it will send a register
+request, with an accept to the tunnel client. The tunnel client will then check if
+it can handle the request, and if it can, it will create a new tunnel session
+to the tunnel server. The tunnel session is then forwarded to the tunnel client
+handler function on the tunnel client, and returned to the `NewSession` request
 on the tunnel server.
 
 ### Target Registration
 
 During registration, a client will send a `Target` message to register its
-target (ID and type). The tunnel server will check if the target is already 
-registered. It will return an error message not accepted (e.g. target already 
-exists) or return an accepted acknowledgement message otherwise. A target 
+target (ID and type). The tunnel server will check if the target is already
+registered. It will return an error message not accepted (e.g. target already
+exists) or return an accepted acknowledgement message otherwise. A target
 addition handler will be called.
 
-Once the tunnel is up running, subsequent addition and deletion of targets are 
+Once the tunnel is up running, subsequent addition and deletion of targets are
 also supported.
 
 ### Message Flow
@@ -362,27 +366,27 @@ also supported.
 ### Subscription
 
 During registration, a client sends an `subscription` message to subscribe
-targets from the tunnel server. The subscription can be either by target type 
-or everything if the `target_type` field is empty. Once the tunnel server 
-receives the subscription, it will send a list of filtered targets back to 
-client as `Target` message. After sending the whole list, it sends an accepted 
-message. The tunnel server will also send updates to all corresponding 
+targets from the tunnel server. The subscription can be either by target type
+or everything if the `target_type` field is empty. Once the tunnel server
+receives the subscription, it will send a list of filtered targets back to
+client as `Target` message. After sending the whole list, it sends an accepted
+message. The tunnel server will also send updates to all corresponding
 subscribers when a target is added or deleted.
 
-Once the tunnel is up running, subsequent subscription and unsubscription are 
+Once the tunnel is up running, subsequent subscription and unsubscription are
 also supported.
 
 ### Bridge Mode
 
 The bridge mode is a special session initiated from a client, where the
-requested target is `remote` to tunnel server. It is initiated in the same way 
-as non-bridge session via `NewSession` while the target ID and type corresponds 
+requested target is `remote` to tunnel server. It is initiated in the same way
+as non-bridge session via `NewSession` while the target ID and type corresponds
 to a `remote` target for the tunnel server.
 
 Upon receiving such request, tunnel server will check if the request corresponds
-to a`remote` target (otherwise, it will be treated as a normal new session 
-request as in [Client](#client)). Next, the bridge reigster handler and tunnel 
+to a`remote` target (otherwise, it will be treated as a normal new session
+request as in [Client](#client)). Next, the bridge reigster handler and tunnel
 handler will be called, where it will call `NewSession` to create  a new session
-to the `remote` client, and start a continuous bi-direcitonal copy between the 
-newly created session (with the `remote` client) and the session with the 
+to the `remote` client, and start a continuous bi-direcitonal copy between the
+newly created session (with the `remote` client) and the session with the
 original client.
