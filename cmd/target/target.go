@@ -15,7 +15,7 @@
 //
 
 // This binary creates a tunnel target, which listen for incoming connection.
-// If the incoming session is of supported type (SSH or GNMI), then it wiill
+// If the incoming session is of supported type (SSH or GNMI), then it will be
 // relayed to a local port with the provide port.
 // Exmaple to use this binary:
 //	target --config_file=$CONFIG_FILE

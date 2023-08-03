@@ -810,6 +810,7 @@ func TestServerNewSession(t *testing.T) {
 			go func() {
 				ch := s.connection(1, addr)
 				for ch == nil {
+					time.Sleep(1 * time.Second)
 					ch = s.connection(1, addr)
 				}
 				if test.sendAll {
@@ -823,7 +824,13 @@ func TestServerNewSession(t *testing.T) {
 				}
 				ch <- test.ioe
 			}()
-			rwc, err := s.NewSession(context.Background(), ServerSession{})
+			rwc, err := s.NewSession(context.Background(), ServerSession{
+				Addr: addr,
+				Target: Target{
+					ID:   "1",
+					Type: "foo",
+				},
+			})
 			if err == nil && test.wantErr {
 				t.Fatalf("NewSession() want error, got %v", err)
 			}
