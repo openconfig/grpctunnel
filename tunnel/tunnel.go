@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 
+	"github.com/openconfig/gnmi/errlist"
 	"github.com/openconfig/grpctunnel/bidi"
 	tpb "github.com/openconfig/grpctunnel/proto/tunnel"
 )
@@ -1036,6 +1037,7 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 	tag := s.nextTag()
 	for addr, clientInfo := range s.clients {
 		if _, ok := clientInfo.targets[ss.Target]; !ok {
+			errCh <- fmt.Errorf("failed to resolve target: %s", ss.Target.ID)
 			continue
 		}
 		wg.Add(1)
@@ -1058,7 +1060,12 @@ func (s *Server) NewSession(ctx context.Context, ss ServerSession) (io.ReadWrite
 		return rwc, nil
 	default:
 	}
-	return nil, <-errCh
+	close(errCh)
+	var el errlist.List
+	for e := range errCh {
+		el.Add(e)
+	}
+	return nil, el.Err()
 }
 
 func (s *Server) handleSession(ctx context.Context, tag int32, addr net.Addr, target Target, stream regStream) (_ io.ReadWriteCloser, err error) {
