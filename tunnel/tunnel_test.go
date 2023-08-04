@@ -953,7 +953,7 @@ func TestClientRun(t *testing.T) {
 				ctx:      ctx,
 				maxSends: 10,
 				streamRecv: []*tpb.RegisterOp{
-					&tpb.RegisterOp{},
+					{},
 				},
 			}},
 			c: client,
@@ -1012,7 +1012,7 @@ func TestClientStart(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: false, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: false, Target: "testID"}}},
 					},
 					streamSend: []*tpb.RegisterOp{},
 				},
@@ -1024,7 +1024,7 @@ func TestClientStart(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
 					},
 					streamSend: []*tpb.RegisterOp{},
 				},
@@ -1211,7 +1211,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
 					},
 					sendErr: true,
 				},
@@ -1228,7 +1228,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
 					},
 					streamSend: []*tpb.RegisterOp{},
 				},
@@ -1248,7 +1248,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
 					},
 					streamSend: []*tpb.RegisterOp{},
 				},
@@ -1270,7 +1270,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
 					},
 					streamSend: []*tpb.RegisterOp{},
 				},
@@ -1290,7 +1290,7 @@ func TestClientStreamHandler(t *testing.T) {
 			client: &tunnelClient{
 				regStream: &registerClientStream{
 					streamRecv: []*tpb.RegisterOp{
-						&tpb.RegisterOp{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
+						{Registration: &tpb.RegisterOp_Session{Session: &tpb.Session{Tag: 1, Accept: true, Target: "testID"}}},
 					},
 					streamSend: []*tpb.RegisterOp{},
 				},

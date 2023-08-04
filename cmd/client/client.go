@@ -1,11 +1,10 @@
-//
 // Copyright 2019 Google Inc. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//    http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//
 // This binary creates a tunnel client to proxy incoming connections
 // over a grpc transport.
 // Exmaples to use this binary with ssh's ProxyCommand option:
 // TLS:
-//		ssh -o ProxyCommand="client
-//		--tunnel_server_address=localhost:$PORT \
-//		--cert_file=$CERT_FILE \
-//		--dial_target=target1 \
-//		--dial_target_type=SSH" $USER@localhost
+//
+//	ssh -o ProxyCommand="client
+//	--tunnel_server_address=localhost:$PORT \
+//	--cert_file=$CERT_FILE \
+//	--dial_target=target1 \
+//	--dial_target_type=SSH" $USER@localhost
+//
 // mTLS:
-//		ssh -o ProxyCommand="client
-//		--tunnel_server_address=localhost:$PORT \
-//		--cert_file=$CERT_FILE \
-//		--key_file=$KEY_FILE \
-//		--ca_file=$CA_FILE \
-//		--dial_target=target1 \
-//		--dial_target_type=SSH" $USER@localhost
+//
+//	ssh -o ProxyCommand="client
+//	--tunnel_server_address=localhost:$PORT \
+//	--cert_file=$CERT_FILE \
+//	--key_file=$KEY_FILE \
+//	--ca_file=$CA_FILE \
+//	--dial_target=target1 \
+//	--dial_target_type=SSH" $USER@localhost
 package main
 
 import (
