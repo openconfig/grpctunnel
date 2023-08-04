@@ -17,10 +17,13 @@
 // This binary runs a tunnel server, which serves as a proxy between tunnel clients.
 // Exmaples to use this binary is with ssh's ProxyCommand option:
 // TLS:
-// 	server --tunnel_address=localhost:$PORT \
-// 	--cert_file=$CERT_FILE \
+//
+//	server --tunnel_address=localhost:$PORT \
+//	--cert_file=$CERT_FILE \
 //	--key_file=$KEY_FILE
+//
 // mTLS:
+//
 //	server --tunnel_address=localhost:$PORT \
 //	--cert_file=$CERT_FILE \
 //	--key_file=$KEY_FILE \
