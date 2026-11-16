@@ -326,18 +326,24 @@ func (s *Server) clientInfo(addr net.Addr) clientRegInfo {
 
 // clientTargets returns all the targets of a given client. If addr is nil, return all the targets.
 func (s *Server) clientTargets(addr net.Addr) map[Target]struct{} {
-	s.cmu.RLock()
-	defer s.cmu.RUnlock()
 	// Make a deep copy.
 	targets := make(map[Target]struct{})
 
 	if addr == nil {
+		// rTargets is guarded by tmu, not cmu. Iterating it while holding only
+		// cmu races with addTargetToMap and deleteTargetFromMap, which the Go
+		// runtime reports as a fatal, unrecoverable "concurrent map iteration
+		// and map write" that terminates the server.
+		s.tmu.RLock()
+		defer s.tmu.RUnlock()
 		for t := range s.rTargets {
 			targets[t] = struct{}{}
 		}
 		return targets
 	}
 
+	s.cmu.RLock()
+	defer s.cmu.RUnlock()
 	info, ok := s.clients[addr]
 	if !ok {
 		return nil
