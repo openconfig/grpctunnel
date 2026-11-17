@@ -928,6 +928,427 @@ func TestServerNewSession(t *testing.T) {
 	}
 }
 
+// recordingRegStream is a register stream that records what the server sends.
+// While it is blocked, Send waits, which emulates a subscriber that does not
+// read its register stream.
+type recordingRegStream struct {
+	open     chan struct{}
+	openOnce sync.Once
+	entered  chan struct{} // receives a value when a Send starts
+
+	mu   sync.Mutex
+	sent []*tpb.RegisterOp
+}
+
+func newRecordingRegStream(blocked bool) *recordingRegStream {
+	s := &recordingRegStream{open: make(chan struct{}), entered: make(chan struct{}, 1)}
+	if !blocked {
+		s.unblock()
+	}
+	return s
+}
+
+func (s *recordingRegStream) unblock() { s.openOnce.Do(func() { close(s.open) }) }
+
+func (s *recordingRegStream) Recv() (*tpb.RegisterOp, error) { return nil, errRead }
+
+func (s *recordingRegStream) Send(op *tpb.RegisterOp) error {
+	select {
+	case s.entered <- struct{}{}:
+	default:
+	}
+	<-s.open
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, op)
+	return nil
+}
+
+// ops returns the messages sent so far.
+func (s *recordingRegStream) ops() []*tpb.RegisterOp {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*tpb.RegisterOp(nil), s.sent...)
+}
+
+// targetUpdates returns the target ADD and REMOVE updates in ops.
+func targetUpdates(ops []*tpb.RegisterOp) []*tpb.Target {
+	var updates []*tpb.Target
+	for _, op := range ops {
+		if t := op.GetTarget(); t.GetOp() == tpb.Target_ADD || t.GetOp() == tpb.Target_REMOVE {
+			updates = append(updates, t)
+		}
+	}
+	return updates
+}
+
+// replayTargets applies target updates in order and returns the resulting set
+// of targets. A subscriber must never be sent an ADD of a target it already
+// has, or a REMOVE of one it does not have.
+func replayTargets(updates []*tpb.Target) (map[Target]bool, error) {
+	got := map[Target]bool{}
+	for i, u := range updates {
+		t := Target{ID: u.GetTarget(), Type: u.GetTargetType()}
+		switch add := u.GetOp() == tpb.Target_ADD; {
+		case add && got[t]:
+			return nil, fmt.Errorf("update %d adds %v, which the subscriber already has", i, t)
+		case !add && !got[t]:
+			return nil, fmt.Errorf("update %d removes %v, which the subscriber does not have", i, t)
+		case add:
+			got[t] = true
+		default:
+			delete(got, t)
+		}
+	}
+	return got, nil
+}
+
+func sameTargets(a, b map[Target]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for t := range a {
+		if !b[t] {
+			return false
+		}
+	}
+	return true
+}
+
+// waitForTargets waits until the target updates sent on s add up to want.
+func waitForTargets(t *testing.T, s *recordingRegStream, want map[Target]bool) {
+	t.Helper()
+	for deadline := time.Now().Add(deadlockTimeout); ; time.Sleep(time.Millisecond) {
+		got, err := replayTargets(targetUpdates(s.ops()))
+		if err != nil {
+			t.Fatalf("invalid sequence of target updates: %v", err)
+		}
+		if sameTargets(got, want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("subscriber has targets %v, want %v", got, want)
+		}
+	}
+}
+
+// runWithDeadline fails the test if f does not return within deadlockTimeout.
+func runWithDeadline(t *testing.T, what string, f func() error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- f() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("%s failed: %v", what, err)
+		}
+	case <-time.After(deadlockTimeout):
+		t.Fatalf("%s blocked on a subscriber that is not reading its register stream", what)
+	}
+}
+
+func testAddr(t *testing.T, port int) net.Addr {
+	t.Helper()
+	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("failed to resolve address: %v", err)
+	}
+	return addr
+}
+
+func testTarget(i int) *tpb.Target {
+	return &tpb.Target{Target: fmt.Sprintf("target%d", i), TargetType: "type1"}
+}
+
+// targetSet returns the set of targets testTarget(i) for i in [from, to).
+func targetSet(from, to int) map[Target]bool {
+	set := map[Target]bool{}
+	for i := from; i < to; i++ {
+		set[Target{ID: testTarget(i).Target, Type: "type1"}] = true
+	}
+	return set
+}
+
+// newSubscriptionTestServer returns a server with a client at ownerAddr that
+// can register targets, and a client at each of subs subscribed to type1.
+func newSubscriptionTestServer(t *testing.T, ownerAddr net.Addr, subs map[net.Addr]regStream) *Server {
+	t.Helper()
+	s, err := NewServer(ServerConfig{})
+	if err != nil {
+		t.Fatalf("NewServer(ServerConfig{}) failed: %v", err)
+	}
+	if err := s.addClient(ownerAddr, &registerTestStream{maxSends: 1000}); err != nil {
+		t.Fatalf("addClient(%v) failed: %v", ownerAddr, err)
+	}
+	for addr, rs := range subs {
+		if err := s.addClient(addr, rs); err != nil {
+			t.Fatalf("addClient(%v) failed: %v", addr, err)
+		}
+		if err := s.addSubscription(addr, "type1"); err != nil {
+			t.Fatalf("addSubscription(%v) failed: %v", addr, err)
+		}
+	}
+	return s
+}
+
+// setTarget registers or removes target i of the client at addr and notifies
+// subscribers, as addTarget and deleteTarget do, without their acks.
+func setTarget(s *Server, addr net.Addr, i int, registered bool) error {
+	t := Target{ID: testTarget(i).Target, Type: "type1"}
+	var err error
+	if registered {
+		err = s.addTargetToMap(addr, t)
+	} else {
+		err = s.deleteTargetFromMap(t)
+	}
+	s.notifySubscribers(t)
+	return err
+}
+
+func TestStalledSubscriberDoesNotBlockTargetRegistration(t *testing.T) {
+	ownerAddr, stalledAddr, healthyAddr := testAddr(t, 45001), testAddr(t, 45002), testAddr(t, 45003)
+	stalled, healthy := newRecordingRegStream(true), newRecordingRegStream(false)
+	t.Cleanup(stalled.unblock)
+	s := newSubscriptionTestServer(t, ownerAddr, map[net.Addr]regStream{stalledAddr: stalled, healthyAddr: healthy})
+
+	runWithDeadline(t, "registering targets", func() error {
+		for i := 0; i < 100; i++ {
+			if err := s.addTarget(ownerAddr, testTarget(i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	// The healthy subscriber gets every target, the stalled subscriber keeps
+	// its subscription, and it catches up once it reads its stream again.
+	waitForTargets(t, healthy, targetSet(0, 100))
+	if _, ok := s.subscribers("type1")[stalledAddr]; !ok {
+		t.Errorf("stalled subscriber %v lost its subscription", stalledAddr)
+	}
+	stalled.unblock()
+	waitForTargets(t, stalled, targetSet(0, 100))
+}
+
+func TestSlowSubscriberReceivesLatestTargets(t *testing.T) {
+	ownerAddr, slowAddr := testAddr(t, 45004), testAddr(t, 45005)
+	slow := newRecordingRegStream(true)
+	t.Cleanup(slow.unblock)
+	s := newSubscriptionTestServer(t, ownerAddr, map[net.Addr]regStream{slowAddr: slow})
+
+	// While the subscriber is not reading: add 50 targets, remove the first 25
+	// and flap target30.
+	runWithDeadline(t, "changing targets", func() error {
+		for i := 0; i < 50; i++ {
+			if err := s.addTarget(ownerAddr, testTarget(i)); err != nil {
+				return err
+			}
+		}
+		for i := 0; i < 25; i++ {
+			if err := s.deleteTarget(ownerAddr, testTarget(i), true); err != nil {
+				return err
+			}
+		}
+		for i := 0; i < 4; i++ {
+			if err := s.deleteTarget(ownerAddr, testTarget(30), true); err != nil {
+				return err
+			}
+			if err := s.addTarget(ownerAddr, testTarget(30)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	slow.unblock()
+	waitForTargets(t, slow, targetSet(25, 50))
+
+	// Superseded changes are skipped. The subscriber gets at most the update
+	// that was in flight when it stopped reading, a REMOVE that undoes it, and
+	// one ADD per remaining target, instead of all 83 changes.
+	if got, limit := len(targetUpdates(slow.ops())), 25+2; got > limit {
+		t.Errorf("subscriber received %d target updates, want at most %d", got, limit)
+	}
+}
+
+func TestStalledSubscriberQueueIsBoundedUnderChurn(t *testing.T) {
+	ownerAddr, stalledAddr := testAddr(t, 45006), testAddr(t, 45007)
+	stalled := newRecordingRegStream(true)
+	t.Cleanup(stalled.unblock)
+	s := newSubscriptionTestServer(t, ownerAddr, map[net.Addr]regStream{stalledAddr: stalled})
+
+	// Register target0 and wait until the server is stuck sending it, so that
+	// the subscriber stays stalled while targets are added and removed under
+	// ever new names. Changes that cancel out must not accumulate in its queue.
+	if err := setTarget(s, ownerAddr, 0, true); err != nil {
+		t.Fatalf("registering target0 failed: %v", err)
+	}
+	select {
+	case <-stalled.entered:
+	case <-time.After(deadlockTimeout):
+		t.Fatal("server did not start sending target0 to the subscriber")
+	}
+	const cycles = 10000
+	runWithDeadline(t, "churning targets", func() error {
+		for i := 1; i <= cycles; i++ {
+			if err := setTarget(s, ownerAddr, i, true); err != nil {
+				return err
+			}
+			if err := setTarget(s, ownerAddr, i, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	u := s.clientInfo(stalledAddr).updates
+	u.mu.Lock()
+	queued := u.pending.Len()
+	u.mu.Unlock()
+	if queued != 0 {
+		t.Errorf("stalled subscriber has %d queued updates after %d add+remove cycles, want 0", queued, cycles)
+	}
+	stalled.unblock()
+	waitForTargets(t, stalled, targetSet(0, 1))
+}
+
+func TestSubscribeSendsCurrentTargetsBeforeAck(t *testing.T) {
+	ownerAddr, subAddr := testAddr(t, 45008), testAddr(t, 45009)
+	s := newSubscriptionTestServer(t, ownerAddr, nil)
+	for i := 0; i < 10; i++ {
+		if err := s.addTarget(ownerAddr, testTarget(i)); err != nil {
+			t.Fatalf("addTarget(%v) failed: %v", testTarget(i), err)
+		}
+	}
+	sub := newRecordingRegStream(false)
+	if err := s.addClient(subAddr, sub); err != nil {
+		t.Fatalf("addClient(%v) failed: %v", subAddr, err)
+	}
+	if err := s.handleSubscription(subAddr, &tpb.Subscription{Op: tpb.Subscription_SUBCRIBE, TargetType: "type1"}); err != nil {
+		t.Fatalf("handleSubscription() failed: %v", err)
+	}
+
+	ops := sub.ops()
+	if len(ops) != 11 {
+		t.Fatalf("subscriber received %d messages, want 10 target updates and an ack: %v", len(ops), ops)
+	}
+	if got, err := replayTargets(targetUpdates(ops[:10])); err != nil || !sameTargets(got, targetSet(0, 10)) {
+		t.Errorf("initial targets = %v (err %v), want %v", got, err, targetSet(0, 10))
+	}
+	if !ops[10].GetSubscription().GetAccept() {
+		t.Errorf("last message = %v, want a subscription ack", ops[10])
+	}
+}
+
+func TestSubscribeConvergesWithConcurrentTargetChanges(t *testing.T) {
+	ownerAddr, subAddr := testAddr(t, 45010), testAddr(t, 45011)
+	s := newSubscriptionTestServer(t, ownerAddr, nil)
+	// target0 stays registered so that type1 always has a target to subscribe
+	// to; targets 1-50 are removed and added back while the client subscribes.
+	for i := 0; i <= 50; i++ {
+		if err := setTarget(s, ownerAddr, i, true); err != nil {
+			t.Fatalf("registering target %d failed: %v", i, err)
+		}
+	}
+	sub := newRecordingRegStream(false)
+	if err := s.addClient(subAddr, sub); err != nil {
+		t.Fatalf("addClient(%v) failed: %v", subAddr, err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for round := 0; round < 10; round++ {
+			for i := 1; i <= 50; i++ {
+				if err := setTarget(s, ownerAddr, i, round%2 == 1); err != nil {
+					t.Errorf("changing target %d failed: %v", i, err)
+					return
+				}
+			}
+		}
+	}()
+	if err := s.handleSubscription(subAddr, &tpb.Subscription{Op: tpb.Subscription_SUBCRIBE, TargetType: "type1"}); err != nil {
+		t.Fatalf("handleSubscription() failed: %v", err)
+	}
+	wg.Wait()
+	waitForTargets(t, sub, targetSet(0, 51))
+}
+
+func TestUnsubscribeStopsTargetUpdates(t *testing.T) {
+	ownerAddr, subAddr := testAddr(t, 45012), testAddr(t, 45013)
+	s := newSubscriptionTestServer(t, ownerAddr, nil)
+	if err := s.addTarget(ownerAddr, testTarget(0)); err != nil {
+		t.Fatalf("addTarget() failed: %v", err)
+	}
+	sub := newRecordingRegStream(false)
+	if err := s.addClient(subAddr, sub); err != nil {
+		t.Fatalf("addClient(%v) failed: %v", subAddr, err)
+	}
+	subscription := func(op tpb.Subscription_SubscriptionOp) {
+		t.Helper()
+		if err := s.handleSubscription(subAddr, &tpb.Subscription{Op: op, TargetType: "type1"}); err != nil {
+			t.Fatalf("handleSubscription(%v) failed: %v", op, err)
+		}
+	}
+
+	subscription(tpb.Subscription_SUBCRIBE)
+	subscription(tpb.Subscription_UNSUBCRIBE)
+	if err := s.addTarget(ownerAddr, testTarget(1)); err != nil {
+		t.Fatalf("addTarget() failed: %v", err)
+	}
+	if got := len(targetUpdates(sub.ops())); got != 1 {
+		t.Fatalf("subscriber received %d target updates before resubscribing, want 1 (target0)", got)
+	}
+
+	// Subscribing again reports all current targets, as before.
+	subscription(tpb.Subscription_SUBCRIBE)
+	updates := targetUpdates(sub.ops())[1:]
+	if got, err := replayTargets(updates); err != nil || !sameTargets(got, targetSet(0, 2)) {
+		t.Errorf("targets after resubscribing = %v (err %v), want %v", got, err, targetSet(0, 2))
+	}
+}
+
+func TestSubscriberUpdatesStop(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rs   regStream
+		stop func(s *Server, addr net.Addr)
+	}{{
+		name: "client deleted while its stream is stalled",
+		rs:   newRecordingRegStream(true),
+		stop: func(s *Server, addr net.Addr) { s.deleteClient(addr) },
+	}, {
+		name: "write to the stream fails",
+		rs:   &registerTestStream{sendErr: true},
+		stop: func(*Server, net.Addr) {},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ownerAddr, subAddr := testAddr(t, 45014), testAddr(t, 45015)
+			if rs, ok := tc.rs.(*recordingRegStream); ok {
+				t.Cleanup(rs.unblock)
+			}
+			s := newSubscriptionTestServer(t, ownerAddr, map[net.Addr]regStream{subAddr: tc.rs})
+			u := s.clientInfo(subAddr).updates
+			runWithDeadline(t, "registering targets and stopping updates", func() error {
+				for i := 0; i < 10; i++ {
+					if err := s.addTarget(ownerAddr, testTarget(i)); err != nil {
+						return err
+					}
+				}
+				tc.stop(s, subAddr)
+				return nil
+			})
+			if rs, ok := tc.rs.(*recordingRegStream); ok {
+				rs.unblock()
+			}
+			select {
+			case <-u.stopped:
+			case <-time.After(deadlockTimeout):
+				t.Fatal("subscriber update goroutine did not exit")
+			}
+		})
+	}
+}
+
 func TestClientRunBlocked(t *testing.T) {
 	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:45000")
 	if err != nil {

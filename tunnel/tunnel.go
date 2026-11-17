@@ -18,6 +18,7 @@
 package tunnel
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -267,6 +268,8 @@ type Target struct {
 type clientRegInfo struct {
 	targets map[Target]struct{}
 	rs      regStream
+	// updates delivers target updates to the client once it subscribes.
+	updates *subscriberUpdates
 }
 
 func (i clientRegInfo) IsZero() bool {
@@ -369,13 +372,14 @@ func (s *Server) addClient(addr net.Addr, rs regStream) error {
 	if _, ok := s.clients[addr]; ok {
 		return fmt.Errorf("client exists for %q", addr.String())
 	}
-	s.clients[addr] = clientRegInfo{rs: rs, targets: make(map[Target]struct{})}
+	s.clients[addr] = clientRegInfo{rs: rs, targets: make(map[Target]struct{}), updates: newSubscriberUpdates(addr, rs)}
 
 	return nil
 }
 
 // deleteClient removes a client from the clients map, and delete the corresponding targets from the targets map.
 func (s *Server) deleteClient(addr net.Addr) {
+	s.deleteSubscriptions(addr)
 	s.cmu.Lock()
 	defer s.cmu.Unlock()
 	clientInfo, ok := s.clients[addr]
@@ -388,6 +392,9 @@ func (s *Server) deleteClient(addr net.Addr) {
 		s.deleteTarget(addr, &target, false)
 	}
 
+	if clientInfo.updates != nil {
+		clientInfo.updates.stop()
+	}
 	delete(s.clients, addr)
 }
 
@@ -487,9 +494,7 @@ func (s *Server) addTarget(addr net.Addr, target *tpb.Target) error {
 		}
 	}
 
-	if err := s.sendUpdates(t, true); err != nil {
-		return fmt.Errorf("failed to send target subscription updates: %v", err)
-	}
+	s.notifySubscribers(t)
 
 	return nil
 }
@@ -555,20 +560,24 @@ func (s *Server) subscribe(addr net.Addr, sub *tpb.Subscription) error {
 		}
 	}
 
-	// Send the initial updates.
-	for t := range targets {
-		if sub.TargetType == "" || sub.TargetType == t.Type {
-			if err := s.sendUpdate(addr, t, true); err != nil {
-				return fmt.Errorf("failed to send initial updates for subscription from %s: %v", addr, err)
-			}
-		}
-	}
-
-	// Send ack.
 	clientInfo := s.clientInfo(addr)
 	if clientInfo.IsZero() {
 		return fmt.Errorf("failed to send subscription ack for %s, its clientInfo", addr)
 	}
+
+	// Queue the current targets on the subscriber's own update queue, so that
+	// concurrent changes cannot overtake them, and wait for them to be sent
+	// before the ack, as before. This only waits on the subscriber's own stream.
+	var initial []Target
+	for t := range targets {
+		if sub.TargetType == "" || sub.TargetType == t.Type {
+			initial = append(initial, t)
+		}
+	}
+	clientInfo.updates.resubscribe(s, sub.TargetType, initial)
+	clientInfo.updates.flush(s)
+
+	// Send ack.
 	rs := clientInfo.rs
 	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Subscription{
 		Subscription: &tpb.Subscription{
@@ -631,46 +640,256 @@ func (s *Server) subscribers(typ string) map[net.Addr]struct{} {
 	return sbs
 }
 
-func (s *Server) sendUpdate(addr net.Addr, target Target, add bool) error {
-	op := tpb.Target_ADD
-	if !add {
-		op = tpb.Target_REMOVE
-	}
+// subscriberUpdates delivers target updates to one client's register stream.
+//
+// Changes are queued without blocking and written by a goroutine dedicated to
+// the subscriber, so a subscriber that reads its stream slowly, or not at all,
+// only delays its own updates: it never blocks the Register loop of the client
+// whose target changed, and it is never dropped. The queue holds targets rather
+// than messages, and a target is queued only while the subscriber's view of it
+// is out of date. The sender reports each queued target's current state, so a
+// slow subscriber skips superseded changes and converges on the current set of
+// targets, and changes that cancel out, such as a target added and removed
+// before the subscriber was told about it, leave nothing behind. The queue
+// therefore never holds more than the current targets plus the targets the
+// subscriber still has to be told were removed.
+type subscriberUpdates struct {
+	addr net.Addr
+	rs   regStream
 
-	clientInfo := s.clientInfo(addr)
-	if clientInfo.IsZero() {
-		return fmt.Errorf("trying to send update to a non-existing client %s", addr)
-	}
-	rs := clientInfo.rs
-	if err := rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
-		Target:     target.ID,
-		TargetType: target.Type,
-		Op:         op,
-	}}}); err != nil {
-		return fmt.Errorf("failed to send subscription update for %s: %v", addr, err)
-	}
+	mu         sync.Mutex
+	pending    *list.List               // updateItems, in order
+	queued     map[Target]*list.Element // elements of pending, by target
+	advertised map[Target]struct{}      // targets the subscriber was last told exist
+	inflight   Target                   // target being sent, if sending
+	sending    bool
+	started    bool // whether the sender goroutine was started
 
-	return nil
+	wake     chan struct{} // capacity 1; tells the sender that pending changed
+	done     chan struct{} // closed when the client is deleted
+	stopped  chan struct{} // closed when the sender goroutine exits
+	stopOnce sync.Once
 }
 
-func (s *Server) sendUpdates(target Target, add bool) error {
-	addrs := s.subscribers(target.Type)
+// updateItem is either a target whose current state the subscriber may need to
+// be told, or a barrier that the sender closes once all earlier items are done.
+type updateItem struct {
+	target  Target
+	barrier chan struct{}
+}
 
-	if addrs == nil {
-		return nil
+func newSubscriberUpdates(addr net.Addr, rs regStream) *subscriberUpdates {
+	return &subscriberUpdates{
+		addr:       addr,
+		rs:         rs,
+		pending:    list.New(),
+		queued:     make(map[Target]*list.Element),
+		advertised: make(map[Target]struct{}),
+		wake:       make(chan struct{}, 1),
+		done:       make(chan struct{}),
+		stopped:    make(chan struct{}),
 	}
+}
 
-	var e error
-	for addr := range addrs {
-		if err := s.sendUpdate(addr, target, add); err != nil {
-			if e != nil {
-				e = err
-			} else {
-				e = fmt.Errorf("%s\n%s", err, e)
+// update tells u that targets may have changed. It never blocks on the
+// subscriber's stream.
+func (u *subscriberUpdates) update(s *Server, targets ...Target) {
+	u.mu.Lock()
+	for _, t := range targets {
+		u.reconcileLocked(s, t)
+	}
+	u.mu.Unlock()
+	u.kick(s)
+}
+
+// resubscribe forgets what the subscriber was told about targets of type typ,
+// or of all types if typ is empty, so that a new subscription reports them
+// again, and queues the given current targets.
+func (u *subscriberUpdates) resubscribe(s *Server, typ string, targets []Target) {
+	u.mu.Lock()
+	for t := range u.advertised {
+		if typ == "" || t.Type == typ {
+			delete(u.advertised, t)
+		}
+	}
+	for _, t := range targets {
+		u.reconcileLocked(s, t)
+	}
+	u.mu.Unlock()
+	u.kick(s)
+}
+
+// reconcileLocked queues target t if the subscriber's view of it is out of
+// date, or if t is being sent so that it is checked again afterwards, and
+// removes t from the queue otherwise. u.mu must be held.
+func (u *subscriberUpdates) reconcileLocked(s *Server, t Target) {
+	_, advertised := u.advertised[t]
+	need := s.targetExists(t) != advertised || (u.sending && u.inflight == t)
+	e, queued := u.queued[t]
+	switch {
+	case need && !queued:
+		u.queued[t] = u.pending.PushBack(updateItem{target: t})
+	case !need && queued:
+		u.pending.Remove(e)
+		delete(u.queued, t)
+	}
+}
+
+// flush blocks until everything queued before the call has been sent, or the
+// sender has stopped. It waits on this subscriber's stream only, so only the
+// subscriber's own goroutines may call it.
+func (u *subscriberUpdates) flush(s *Server) {
+	b := make(chan struct{})
+	u.mu.Lock()
+	u.pending.PushBack(updateItem{barrier: b})
+	u.mu.Unlock()
+	u.kick(s)
+	select {
+	case <-b:
+	case <-u.stopped:
+	case <-u.done:
+	}
+}
+
+// kick starts the sender goroutine if needed and wakes it up.
+func (u *subscriberUpdates) kick(s *Server) {
+	u.mu.Lock()
+	start := !u.started && u.pending.Len() > 0
+	if start {
+		u.started = true
+	}
+	u.mu.Unlock()
+	if start {
+		go s.sendSubscriberUpdates(u)
+	}
+	select {
+	case u.wake <- struct{}{}:
+	default:
+	}
+}
+
+// next removes queued items until it finds a target whose state the subscriber
+// must be told, marks it as being sent and returns it along with whether it
+// exists. ok is false once the queue is empty.
+func (u *subscriberUpdates) next(s *Server) (t Target, exists, ok bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for e := u.pending.Front(); e != nil; e = u.pending.Front() {
+		it := u.pending.Remove(e).(updateItem)
+		if it.barrier != nil {
+			close(it.barrier)
+			continue
+		}
+		t = it.target
+		delete(u.queued, t)
+		if !s.subscribed(u.addr, t.Type) {
+			// Unsubscribed clients get no further updates for the type.
+			delete(u.advertised, t)
+			continue
+		}
+		_, advertised := u.advertised[t]
+		if exists = s.targetExists(t); exists == advertised {
+			continue
+		}
+		u.inflight, u.sending = t, true
+		return t, exists, true
+	}
+	return Target{}, false, false
+}
+
+// sent records the outcome of sending the state of target t.
+func (u *subscriberUpdates) sent(t Target, exists bool, err error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.sending = false
+	switch {
+	case err != nil:
+	case exists:
+		u.advertised[t] = struct{}{}
+	default:
+		delete(u.advertised, t)
+	}
+}
+
+// stop tells the sender goroutine to exit. It is called when the client is
+// deleted.
+func (u *subscriberUpdates) stop() {
+	u.stopOnce.Do(func() { close(u.done) })
+}
+
+// notifySubscribers tells every subscriber of target t's type that t may have
+// changed. It never blocks on a subscriber's stream.
+func (s *Server) notifySubscribers(t Target) {
+	for addr := range s.subscribers(t.Type) {
+		if u := s.clientInfo(addr).updates; u != nil {
+			u.update(s, t)
+		}
+	}
+}
+
+// sendSubscriberUpdates is the sender goroutine of u. It runs until the client
+// is deleted or a write to its stream fails.
+func (s *Server) sendSubscriberUpdates(u *subscriberUpdates) {
+	defer close(u.stopped)
+	for {
+		select {
+		case <-u.done:
+			return
+		case <-u.wake:
+		}
+		for {
+			select {
+			case <-u.done:
+				return
+			default:
+			}
+			t, exists, ok := u.next(s)
+			if !ok {
+				break
+			}
+			op := tpb.Target_ADD
+			if !exists {
+				op = tpb.Target_REMOVE
+			}
+			err := u.rs.Send(&tpb.RegisterOp{Registration: &tpb.RegisterOp_Target{Target: &tpb.Target{
+				Target:     t.ID,
+				TargetType: t.Type,
+				Op:         op,
+			}}})
+			u.sent(t, exists, err)
+			if err != nil {
+				s.sendError(fmt.Errorf("failed to send target update to subscriber %s: %v", u.addr, err))
+				return
 			}
 		}
 	}
-	return e
+}
+
+// subscribed reports whether the client at addr is subscribed to targets of
+// type typ.
+func (s *Server) subscribed(addr net.Addr, typ string) bool {
+	s.smu.RLock()
+	defer s.smu.RUnlock()
+	_, ok := s.sub[addr][typ]
+	return ok
+}
+
+// deleteSubscriptions removes all subscriptions of the client at addr.
+func (s *Server) deleteSubscriptions(addr net.Addr) {
+	s.smu.Lock()
+	defer s.smu.Unlock()
+	delete(s.sub, addr)
+}
+
+// targetExists reports whether t is currently a local or registered target.
+func (s *Server) targetExists(t Target) bool {
+	if _, ok := s.lTargets[t]; ok {
+		return true
+	}
+	s.tmu.RLock()
+	defer s.tmu.RUnlock()
+	_, ok := s.rTargets[t]
+	return ok
 }
 
 // deleteTarget unregisters a target for a given client. It unregisters
@@ -719,9 +938,7 @@ func (s *Server) deleteTarget(addr net.Addr, target *tpb.Target, ack bool) error
 		}
 	}
 	s.deleteSubscriber(addr, "")
-	if err := s.sendUpdates(t, false); err != nil {
-		return fmt.Errorf("failed to send target subscription updates: %v", err)
-	}
+	s.notifySubscribers(t)
 
 	return nil
 }
