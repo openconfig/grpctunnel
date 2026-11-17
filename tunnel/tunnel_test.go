@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -673,6 +674,86 @@ func TestServerRegister(t *testing.T) {
 				t.Fatalf("Register() want error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestClientTargetsAllReadsUnderTargetsLock(t *testing.T) {
+	s, err := NewServer(ServerConfig{})
+	if err != nil {
+		t.Fatalf("NewServer(ServerConfig{}) failed: %v", err)
+	}
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:45000")
+	if err != nil {
+		t.Fatalf("failed to resolve address: %v", err)
+	}
+	want := Target{ID: "target1", Type: "type1"}
+	if err := s.addTargetToMap(addr, want); err != nil {
+		t.Fatalf("addTargetToMap(%v, %v) failed: %v", addr, want, err)
+	}
+
+	// While rTargets is write-locked, clientTargets(nil) must wait for tmu
+	// rather than iterate rTargets under the unrelated cmu lock.
+	s.tmu.Lock()
+	got := make(chan map[Target]struct{}, 1)
+	go func() { got <- s.clientTargets(nil) }()
+	select {
+	case <-got:
+		s.tmu.Unlock()
+		t.Fatal("clientTargets(nil) returned while tmu was write-locked; rTargets must be read under tmu")
+	case <-time.After(100 * time.Millisecond):
+	}
+	s.tmu.Unlock()
+
+	select {
+	case targets := <-got:
+		if len(targets) != 1 {
+			t.Errorf("clientTargets(nil) returned %d targets, want 1: %v", len(targets), targets)
+		}
+		if _, ok := targets[want]; !ok {
+			t.Errorf("clientTargets(nil) = %v, want it to contain %v", targets, want)
+		}
+	case <-time.After(deadlockTimeout):
+		t.Fatal("clientTargets(nil) did not return after tmu was released")
+	}
+}
+
+func TestClientTargetsAllConcurrentWithTargetRegistration(t *testing.T) {
+	s, err := NewServer(ServerConfig{})
+	if err != nil {
+		t.Fatalf("NewServer(ServerConfig{}) failed: %v", err)
+	}
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:45000")
+	if err != nil {
+		t.Fatalf("failed to resolve address: %v", err)
+	}
+
+	// Register targets (which writes rTargets under tmu) while concurrently
+	// listing all targets, as subscription requests do. Reading rTargets under
+	// the wrong lock crashes the process with "concurrent map iteration and map
+	// write" (or is reported by the race detector).
+	const numTargets = 1000
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < numTargets; i++ {
+			tgt := Target{ID: fmt.Sprintf("target%d", i), Type: "type1"}
+			if err := s.addTargetToMap(addr, tgt); err != nil {
+				t.Errorf("addTargetToMap(%v, %v) failed: %v", addr, tgt, err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < numTargets; i++ {
+			s.clientTargets(nil)
+		}
+	}()
+	wg.Wait()
+
+	if got := len(s.clientTargets(nil)); got != numTargets {
+		t.Errorf("clientTargets(nil) returned %d targets, want %d", got, numTargets)
 	}
 }
 
