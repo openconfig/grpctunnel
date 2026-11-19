@@ -661,6 +661,7 @@ type subscriberUpdates struct {
 	pending    *list.List               // updateItems, in order
 	queued     map[Target]*list.Element // elements of pending, by target
 	advertised map[Target]struct{}      // targets the subscriber was last told exist
+	resend     map[Target]struct{}      // advertised targets to report again
 	inflight   Target                   // target being sent, if sending
 	sending    bool
 	started    bool // whether the sender goroutine was started
@@ -685,6 +686,7 @@ func newSubscriberUpdates(addr net.Addr, rs regStream) *subscriberUpdates {
 		pending:    list.New(),
 		queued:     make(map[Target]*list.Element),
 		advertised: make(map[Target]struct{}),
+		resend:     make(map[Target]struct{}),
 		wake:       make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		stopped:    make(chan struct{}),
@@ -702,14 +704,18 @@ func (u *subscriberUpdates) update(s *Server, targets ...Target) {
 	u.kick(s)
 }
 
-// resubscribe forgets what the subscriber was told about targets of type typ,
-// or of all types if typ is empty, so that a new subscription reports them
-// again, and queues the given current targets.
+// resubscribe handles a subscription request for targets of type typ, or of
+// all types if typ is empty, given the current targets of the type. As before,
+// a subscription reports every current target, including the ones the
+// subscriber was already told about. The subscriber is also told about every
+// target of the type that it was told about but that is gone, including
+// removals that were still queued.
 func (u *subscriberUpdates) resubscribe(s *Server, typ string, targets []Target) {
 	u.mu.Lock()
 	for t := range u.advertised {
 		if typ == "" || t.Type == typ {
-			delete(u.advertised, t)
+			u.resend[t] = struct{}{}
+			u.reconcileLocked(s, t)
 		}
 	}
 	for _, t := range targets {
@@ -720,11 +726,19 @@ func (u *subscriberUpdates) resubscribe(s *Server, typ string, targets []Target)
 }
 
 // reconcileLocked queues target t if the subscriber's view of it is out of
-// date, or if t is being sent so that it is checked again afterwards, and
-// removes t from the queue otherwise. u.mu must be held.
+// date, if t must be reported again, or if t is being sent so that it is
+// checked again afterwards, and removes t from the queue otherwise. u.mu must
+// be held.
 func (u *subscriberUpdates) reconcileLocked(s *Server, t Target) {
+	exists := s.targetExists(t)
 	_, advertised := u.advertised[t]
-	need := s.targetExists(t) != advertised || (u.sending && u.inflight == t)
+	if !exists || !advertised {
+		// Only targets that the subscriber has and that exist are reported
+		// again.
+		delete(u.resend, t)
+	}
+	_, resend := u.resend[t]
+	need := exists != advertised || resend || (u.sending && u.inflight == t)
 	e, queued := u.queued[t]
 	switch {
 	case need && !queued:
@@ -782,13 +796,16 @@ func (u *subscriberUpdates) next(s *Server) (t Target, exists, ok bool) {
 		}
 		t = it.target
 		delete(u.queued, t)
+		_, resend := u.resend[t]
+		delete(u.resend, t)
 		if !s.subscribed(u.addr, t.Type) {
-			// Unsubscribed clients get no further updates for the type.
-			delete(u.advertised, t)
+			// Unsubscribed clients get no further updates for the type. What
+			// they were told is kept, so that a new subscription can correct
+			// it.
 			continue
 		}
 		_, advertised := u.advertised[t]
-		if exists = s.targetExists(t); exists == advertised {
+		if exists = s.targetExists(t); exists == advertised && !(exists && resend) {
 			continue
 		}
 		u.inflight, u.sending = t, true

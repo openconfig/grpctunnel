@@ -932,11 +932,10 @@ func TestServerNewSession(t *testing.T) {
 // While it is blocked, Send waits, which emulates a subscriber that does not
 // read its register stream.
 type recordingRegStream struct {
-	open     chan struct{}
-	openOnce sync.Once
-	entered  chan struct{} // receives a value when a Send starts
+	entered chan struct{} // receives a value when a Send starts
 
 	mu   sync.Mutex
+	open chan struct{} // closed while Send does not block
 	sent []*tpb.RegisterOp
 }
 
@@ -948,7 +947,41 @@ func newRecordingRegStream(blocked bool) *recordingRegStream {
 	return s
 }
 
-func (s *recordingRegStream) unblock() { s.openOnce.Do(func() { close(s.open) }) }
+// block makes later Sends wait until unblock is called.
+func (s *recordingRegStream) block() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.open:
+		s.open = make(chan struct{})
+	default:
+	}
+}
+
+func (s *recordingRegStream) unblock() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.open:
+	default:
+		close(s.open)
+	}
+}
+
+// waitForSend waits until a Send that starts after the call is in progress.
+func (s *recordingRegStream) waitForSend(t *testing.T, start func()) {
+	t.Helper()
+	select {
+	case <-s.entered:
+	default:
+	}
+	start()
+	select {
+	case <-s.entered:
+	case <-time.After(deadlockTimeout):
+		t.Fatal("server did not start sending to the subscriber")
+	}
+}
 
 func (s *recordingRegStream) Recv() (*tpb.RegisterOp, error) { return nil, errRead }
 
@@ -957,7 +990,10 @@ func (s *recordingRegStream) Send(op *tpb.RegisterOp) error {
 	case s.entered <- struct{}{}:
 	default:
 	}
-	<-s.open
+	s.mu.Lock()
+	open := s.open
+	s.mu.Unlock()
+	<-open
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sent = append(s.sent, op)
@@ -1179,14 +1215,11 @@ func TestStalledSubscriberQueueIsBoundedUnderChurn(t *testing.T) {
 	// Register target0 and wait until the server is stuck sending it, so that
 	// the subscriber stays stalled while targets are added and removed under
 	// ever new names. Changes that cancel out must not accumulate in its queue.
-	if err := setTarget(s, ownerAddr, 0, true); err != nil {
-		t.Fatalf("registering target0 failed: %v", err)
-	}
-	select {
-	case <-stalled.entered:
-	case <-time.After(deadlockTimeout):
-		t.Fatal("server did not start sending target0 to the subscriber")
-	}
+	stalled.waitForSend(t, func() {
+		if err := setTarget(s, ownerAddr, 0, true); err != nil {
+			t.Fatalf("registering target0 failed: %v", err)
+		}
+	})
 	const cycles = 10000
 	runWithDeadline(t, "churning targets", func() error {
 		for i := 1; i <= cycles; i++ {
@@ -1304,6 +1337,100 @@ func TestUnsubscribeStopsTargetUpdates(t *testing.T) {
 	updates := targetUpdates(sub.ops())[1:]
 	if got, err := replayTargets(updates); err != nil || !sameTargets(got, targetSet(0, 2)) {
 		t.Errorf("targets after resubscribing = %v (err %v), want %v", got, err, targetSet(0, 2))
+	}
+}
+
+func TestResubscribeKeepsPendingRemove(t *testing.T) {
+	ownerAddr, subAddr := testAddr(t, 45016), testAddr(t, 45017)
+	sub := newRecordingRegStream(false)
+	t.Cleanup(sub.unblock)
+	s := newSubscriptionTestServer(t, ownerAddr, map[net.Addr]regStream{subAddr: sub})
+	if err := s.addTarget(ownerAddr, testTarget(0)); err != nil {
+		t.Fatalf("addTarget() failed: %v", err)
+	}
+	waitForTargets(t, sub, targetSet(0, 1))
+
+	// The subscriber stops reading while the server sends target1, so the
+	// REMOVE of target0 waits in its queue when it subscribes again.
+	sub.block()
+	sub.waitForSend(t, func() {
+		if err := s.addTarget(ownerAddr, testTarget(1)); err != nil {
+			t.Fatalf("addTarget() failed: %v", err)
+		}
+	})
+	if err := s.deleteTarget(ownerAddr, testTarget(0), true); err != nil {
+		t.Fatalf("deleteTarget() failed: %v", err)
+	}
+	s.clientInfo(subAddr).updates.resubscribe(s, "type1", []Target{{ID: testTarget(1).Target, Type: "type1"}})
+	sub.unblock()
+
+	// The subscriber is still told that target0 is gone.
+	waitForTargets(t, sub, targetSet(1, 2))
+}
+
+func TestSubscribeAgainReportsRemovedTargets(t *testing.T) {
+	ownerAddr, subAddr := testAddr(t, 45018), testAddr(t, 45019)
+	s := newSubscriptionTestServer(t, ownerAddr, nil)
+	for i := 0; i < 2; i++ {
+		if err := s.addTarget(ownerAddr, testTarget(i)); err != nil {
+			t.Fatalf("addTarget() failed: %v", err)
+		}
+	}
+	sub := newRecordingRegStream(false)
+	t.Cleanup(sub.unblock)
+	if err := s.addClient(subAddr, sub); err != nil {
+		t.Fatalf("addClient(%v) failed: %v", subAddr, err)
+	}
+	subscribe := &tpb.Subscription{Op: tpb.Subscription_SUBCRIBE, TargetType: "type1"}
+	if err := s.handleSubscription(subAddr, subscribe); err != nil {
+		t.Fatalf("handleSubscription() failed: %v", err)
+	}
+
+	// While the subscriber is not reading, target0 is removed, so its REMOVE
+	// is still queued when the client unsubscribes. target1 is removed after
+	// that, and target2 is added.
+	sub.block()
+	sub.waitForSend(t, func() {
+		if err := s.addTarget(ownerAddr, testTarget(2)); err != nil {
+			t.Fatalf("addTarget() failed: %v", err)
+		}
+	})
+	if err := s.deleteTarget(ownerAddr, testTarget(0), true); err != nil {
+		t.Fatalf("deleteTarget() failed: %v", err)
+	}
+	s.deleteSubscriber(subAddr, "type1")
+	sub.unblock()
+	u := s.clientInfo(subAddr).updates
+	for deadline := time.Now().Add(deadlockTimeout); ; time.Sleep(time.Millisecond) {
+		u.mu.Lock()
+		idle := u.pending.Len() == 0 && !u.sending
+		u.mu.Unlock()
+		if idle {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("subscriber updates did not finish")
+		}
+	}
+	if err := s.deleteTarget(ownerAddr, testTarget(1), true); err != nil {
+		t.Fatalf("deleteTarget() failed: %v", err)
+	}
+
+	// Subscribing again reports every current target, as before, and the
+	// targets that were removed meanwhile.
+	if err := s.handleSubscription(subAddr, subscribe); err != nil {
+		t.Fatalf("handleSubscription() failed: %v", err)
+	}
+	got := map[Target]bool{}
+	for _, u := range targetUpdates(sub.ops()) {
+		if t := (Target{ID: u.GetTarget(), Type: u.GetTargetType()}); u.GetOp() == tpb.Target_ADD {
+			got[t] = true
+		} else {
+			delete(got, t)
+		}
+	}
+	if !sameTargets(got, targetSet(2, 3)) {
+		t.Errorf("subscriber has targets %v after subscribing again, want %v", got, targetSet(2, 3))
 	}
 }
 
